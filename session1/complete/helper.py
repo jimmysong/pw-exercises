@@ -15,12 +15,6 @@ TWO_WEEKS = 60 * 60 * 24 * 14
 MAX_TARGET = 0xffff * 256**(0x1d - 3)
 
 
-def run(test):
-    suite = TestSuite()
-    suite.addTest(test)
-    TextTestRunner().run(suite)
-
-
 def bytes_to_str(b, encoding='ascii'):
     '''Returns a string version of the bytes'''
     return b.decode(encoding)

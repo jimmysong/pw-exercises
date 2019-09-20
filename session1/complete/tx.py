@@ -170,20 +170,34 @@ class Tx:
         '''Takes a byte stream and parses a segwit transaction'''
         # s.read(n) will return n bytes
         # version has 4 bytes, little-endian, interpret as int
-        # next two bytes need to be 0x00 and 0x01, otherwise raise a RuntimeError
+        version = little_endian_to_int(s.read(4))
+        # next two bytes need to be 0x00 and 0x01
+        marker = s.read(2)
+        if marker != b'\x00\x01':
+            raise RuntimeError('Not a segwit transaction {}'.format(marker))
         # num_inputs is a varint, use read_varint(s)
+        num_inputs = read_varint(s)
         # each input needs parsing
+        inputs = []
+        for _ in range(num_inputs):
+            inputs.append(TxIn.parse(s))
         # num_outputs is a varint, use read_varint(s)
+        num_outputs = read_varint(s)
         # each output needs parsing
+        outputs = []
+        for _ in range(num_outputs):
+            outputs.append(TxOut.parse(s))
         # now parse the witness program
-        # each input has something in the witness field
-            # read the number of items in the witness field using read_varint(s)
-            # the tx_in.witness field is a list
-            # iterate through the number of items and read_varstr(s) to get the item
-            # push that to the witness field
+        for tx_in in inputs:
+            num_items = read_varint(s)
+            items = []
+            for _ in range(num_items):
+                items.append(read_varstr(s))
+            tx_in.witness = items
         # locktime is 4 bytes, little-endian
+        locktime = little_endian_to_int(s.read(4))
         # return an instance of the class (cls(...))
-        raise NotImplementedError
+        return cls(version, inputs, outputs, locktime, testnet=testnet, segwit=True)
 
     def serialize(self):
         if self.segwit:
@@ -214,21 +228,32 @@ class Tx:
     def serialize_segwit(self):
         '''Returns the byte serialization of the transaction'''
         # serialize version (4 bytes, little endian)
-        # segwit marker b'\x00\x01'
+        result = int_to_little_endian(self.version, 4)
+        # segwit marker '0001'
+        result += b'\x00\x01'
         # encode_varint on the number of inputs
+        result += encode_varint(len(self.tx_ins))
         # iterate inputs
+        for tx_in in self.tx_ins:
             # serialize each input
-        # encode_varint on the number of outputs
+            result += tx_in.serialize()
+        # encode_varint on the number of inputs
+        result += encode_varint(len(self.tx_outs))
         # iterate outputs
+        for tx_out in self.tx_outs:
             # serialize each output
-        # add the witness data by iterating through the inputs
-            # add the number of items in the witness field of the input
-            # go through each item in the witness field
-            # if the type of the item is an integer encode using int_to_little_endian
-            # otherwise use encode_varstr to add the item
+            result += tx_out.serialize()
+        # add the witness data
+        for tx_in in self.tx_ins:
+            result += encode_varint(len(tx_in.witness))
+            for item in tx_in.witness:
+                if type(item) == int:
+                    result += int_to_little_endian(item, 1)
+                else:
+                    result += encode_varstr(item)
         # serialize locktime (4 bytes, little endian)
-        # return the entire serialization
-        raise NotImplementedError
+        result += int_to_little_endian(self.locktime, 4)
+        return result
 
     def fee(self):
         '''Returns the fee of this transaction in satoshi'''
@@ -309,20 +334,24 @@ class Tx:
     def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
         '''Returns the integer representation of the hash that needs to get
         signed for index input_index'''
-        # grab the input being signed by looking up the input_index
-        # start with the version in 4 bytes, little endian
-        # add the HashPrevouts and HashSequence
-        # add the previous transaction hash in little endian
-        # add the previous transaction index in 4 bytes, little endian
-        # add the p2pkh script equivalent by getting the ScriptPubKey's 2nd command
-        #  and use that to create a p2pkh_script and serialize afterwards
-        # add the value of the input in 8 bytes, little endian
-        # add the sequence of the input in 4 bytes, little endian
-        # add the HashOutputs
-        # add the locktime in 4 bytes, little endian
-        # add the sighash (SIGHASH_ALL) in 4 bytes, little endian
-        # hash256 the whole thing, interpret the as a big endian integer using int.from_bytes(x, 'big')
-        raise NotImplementedError
+        tx_in = self.tx_ins[input_index]
+        # per BIP143 spec
+        s = int_to_little_endian(self.version, 4)
+        s += self.hash_prevouts() + self.hash_sequence()
+        s += tx_in.prev_tx[::-1] + int_to_little_endian(tx_in.prev_index, 4)
+        if witness_script:
+            script_code = witness_script.serialize()
+        elif redeem_script:
+            script_code = p2pkh_script(redeem_script.commands[1]).serialize()
+        else:
+            script_code = p2pkh_script(tx_in.script_pubkey(self.testnet).commands[1]).serialize()
+        s += script_code
+        s += int_to_little_endian(tx_in.value(self.testnet), 8)
+        s += int_to_little_endian(tx_in.sequence, 4)
+        s += self.hash_outputs()
+        s += int_to_little_endian(self.locktime, 4)
+        s += int_to_little_endian(SIGHASH_ALL, 4)
+        return int.from_bytes(hash256(s), 'big')
 
     def verify_input(self, input_index):
         '''Returns whether the input has a valid signature'''
