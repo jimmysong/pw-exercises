@@ -468,11 +468,9 @@ class S256Point(Point):
         '''Verify a message in the form of bytes. Assumes that the z
         is calculated using hash256 interpreted as a big-endian integer'''
         # calculate the hash256 of the message
-        h256 = hash256(message)
         # z is the big-endian interpretation. use int.from_bytes(x, 'big')
-        z = int.from_bytes(h256, 'big')
         # verify the message using the self.verify method
-        return self.verify(z, sig)
+        raise NotImplementedError
 
     @classmethod
     def parse(self, sec_bin):
@@ -706,11 +704,9 @@ class PrivateKey:
         be assumed to be the hash256 of the message interpreted as a big-endian
         integer.'''
         # compute the hash256 of the message
-        h256 = hash256(message)
         # z is the big-endian interpretation. use int.from_bytes(x, 'big')
-        z = int.from_bytes(h256, 'big')
         # sign the message using the self.sign method
-        return self.sign(z)
+        raise NotImplementedError
 
 
 class PrivateKeyTest(TestCase):

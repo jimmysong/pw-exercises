@@ -5,7 +5,7 @@ from unittest import TestCase
 import hmac
 import hashlib
 
-from helper import encode_base58_checksum, hash160
+from helper import encode_base58_checksum, hash160, hash256
 
 
 class FieldElement:
@@ -464,6 +464,16 @@ class S256Point(Point):
         total = u * G + v * self
         return total.x.num == sig.r
 
+    def verify_message(self, message, sig):
+        '''Verify a message in the form of bytes. Assumes that the z
+        is calculated using hash256 interpreted as a big-endian integer'''
+        # calculate the hash256 of the message
+        h256 = hash256(message)
+        # z is the big-endian interpretation. use int.from_bytes(x, 'big')
+        z = int.from_bytes(h256, 'big')
+        # verify the message using the self.verify method
+        return self.verify(z, sig)
+
     @classmethod
     def parse(self, sec_bin):
         '''returns a Point object from a compressed sec binary (not hex)
@@ -691,6 +701,17 @@ class PrivateKey:
             k = hmac.new(k, v + b'\x00', s256).digest()
             v = hmac.new(k, v, s256).digest()
 
+    def sign_message(self, message):
+        '''Sign a message in the form of bytes instead of the z. The z should
+        be assumed to be the hash256 of the message interpreted as a big-endian
+        integer.'''
+        # compute the hash256 of the message
+        h256 = hash256(message)
+        # z is the big-endian interpretation. use int.from_bytes(x, 'big')
+        z = int.from_bytes(h256, 'big')
+        # sign the message using the self.sign method
+        return self.sign(z)
+
 
 class PrivateKeyTest(TestCase):
 
@@ -699,3 +720,9 @@ class PrivateKeyTest(TestCase):
         z = randint(0, 2**256)
         sig = pk.sign(z)
         self.assertTrue(pk.point.verify(z, sig))
+
+    def test_sign_message(self):
+        pk = PrivateKey(randint(0, 2**256))
+        message = b'This is a test message'
+        sig = pk.sign_message(message)
+        self.assertTrue(pk.point.verify_message(message, sig))

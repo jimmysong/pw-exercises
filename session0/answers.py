@@ -1,6 +1,6 @@
 '''
 #code
->>> import ecc, helper
+>>> import ecc, helper, tx
 
 #endcode
 #markdown
@@ -86,7 +86,7 @@ True
 #endexercise
 #unittest
 ecc:PrivateKeyTest:test_sign_message:
-It's annoying to have to calculate z every time we want to sign or verify a message. Write the `sign_message` method in `PrivateKey` and the 'verify_message` method in `S256Point' to make signing/verifying messages easy.
+It's annoying to have to calculate z every time we want to sign or verify a message. Write the `sign_message` method in `PrivateKey` and the `verify_message` method in `S256Point` to make signing/verifying messages easy.
 #endunittest
 #exercise
 #### Address Refresher
@@ -103,15 +103,14 @@ Get your testnet address from your private key used above.
 #### Transaction Refresher
 
 Send yourself some testnet coins to the address from the previous exercise [using this site](https://faucet.programmingbitcoin.com).
-Then create a transaction to send all the coins to `mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv` and broadcast it via the testnet network.
+Then create a transaction to send all the coins to `mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv` BUT DO NOT BROADCAST IT YET!
 This is a one input, one output transaction.
 ---
 >>> from helper import decode_base58
->>> from network import SimpleNode
 >>> from script import p2pkh_script
->>> from time import sleep
 >>> from tx import Tx, TxIn, TxOut
->>> prev_tx_hex = 'ec7ae33dee6fe3263299f3000045565df305976b9f4bb279917980c0a3c27598'  #/prev_tx_hex = '<fill this in>'
+>>> # this should be the transaction ID and index from the transaction from the faucet
+>>> prev_tx_hex = 'aec4b5bfa8952a80a93e9afd437f4783e51d363303c021f68c7a614ca8a153e4'  #/prev_tx_hex = '<fill this in>'
 >>> prev_index = 1  #/prev_index = -1  # change this
 >>> prev_tx = bytes.fromhex(prev_tx_hex)
 >>> target_address = 'mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv'
@@ -128,13 +127,25 @@ This is a one input, one output transaction.
 >>> tx_out = TxOut(output_amount, script_pubkey)  #/
 >>> # create the transaction with version=1, locktime=0, testnet=True
 >>> tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True)  #/
->>> # sign the transaction's only input
+>>> # sign the transaction's only input using sign_p2pkh
 >>> # the private key from the previous exercise should be in scope
->>> tx_obj.sign_input(0, private_key)  #/
+>>> tx_obj.sign_p2pkh(0, private_key)  #/
 >>> # serialize and hex to see what it looks like
 >>> print(tx_obj.serialize().hex())  #/
 01000000019875c2a3c080799179b24b9f6b9705f35d56450000f3993226e36fee3de37aec010000006b483045022100d7d9b02f29d986c2a63d941e098b9133802e5d267481633bfff241c392e8349902205b6628b1450f65e4da872458a59b69e220481815887117bf401691b93800ac26012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5dffffffff01b82e0f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac00000000
->>> # connect to tbtc.programmingblockchain.com in testnet mode using SimpleNode
+#endexercise
+#unittest
+tx:TxTest:test_sign_input:
+It's annoying to have to already know what the previous output's script type was to sign it as the caller. Create a method to sign any input, though for now, that should only be p2pkh.
+#endunittest
+#exercise
+#### Network Refresher
+
+Broadcast the transaction created in the previous exercise directly on the testnet network.
+---
+>>> from network import SimpleNode
+>>> from time import sleep
+>>> # connect to testnet.programmingbitcoin.com in testnet mode using SimpleNode
 >>> node = SimpleNode('testnet.programmingbitcoin.com', testnet=True)  #/
 >>> # complete the handshake
 >>> node.handshake()  #/
@@ -147,7 +158,7 @@ This is a one input, one output transaction.
 ...     print('success!')  #/
 ...     print(tx_obj.id())  #/
 success!
-fa474e98c0e9a776f6f0a06ad0d4f1150b35bb51875592c0927056cc7bd99cc9
+f6afd234109e5aa6ba388d386fc94c7109bcf1f4e618aaeffdf037e709ab3a77
 
 #endexercise
 '''

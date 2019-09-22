@@ -389,8 +389,8 @@ class Tx:
                 return False
         return True
 
-    def sign_input(self, input_index, private_key):
-        '''Signs the input using the private key'''
+    def sign_p2pkh(self, input_index, private_key):
+        '''Signs the input assuming that the previous output is a p2pkh using the private key'''
         # get the sig_hash (z)
         z = self.sig_hash(input_index)
         # get der signature of z from private key
@@ -405,6 +405,19 @@ class Tx:
         self.tx_ins[input_index].script_sig = script_sig
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
+
+    def sign_input(self, input_index, private_key):
+        '''Signs the input by figuring out what type of ScriptPubKey the previous output was'''
+        # get the input
+        tx_in = self.tx_ins[input_index]
+        # find the previous ScriptPubKey
+        script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
+        # if the script_pubkey is p2pkh (use is_p2pkh_script_pubkey), send to sign_p2pkh
+        if script_pubkey.is_p2pkh_script_pubkey():
+            return self.sign_p2pkh(input_index, private_key)
+        # else return a RuntimeError
+        else:
+            raise RuntimeError('Unknown ScriptPubKey')
 
     def is_coinbase(self):
         '''Returns whether this transaction is a coinbase transaction or not'''
@@ -657,6 +670,19 @@ class TxTest(TestCase):
         tx = TxFetcher.fetch('954f43dbb30ad8024981c07d1f5eb6c9fd461e2cf1760dd1283f052af746fc88', testnet=True)
         self.assertTrue(tx.verify())
 
+    def test_sign_p2pkh(self):
+        private_key = PrivateKey(secret=8675309)
+        tx_ins = []
+        prev_tx = bytes.fromhex('0025bc3c0fa8b7eb55b9437fdbd016870d18e0df0ace7bc9864efc38414147c8')
+        tx_ins.append(TxIn(prev_tx, 0))
+        tx_outs = []
+        h160 = decode_base58('mzx5YhAH9kNHtcN481u6WkjeHjYtVeKVh2')
+        tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=p2pkh_script(h160)))
+        h160 = decode_base58('mnrVtF8DWjMu839VW3rBfgYaAfKk8983Xf')
+        tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=p2pkh_script(h160)))
+        tx = Tx(1, tx_ins, tx_outs, 0, testnet=True)
+        self.assertTrue(tx.sign_p2pkh(0, private_key))
+
     def test_sign_input(self):
         private_key = PrivateKey(secret=8675309)
         tx_ins = []
@@ -667,7 +693,6 @@ class TxTest(TestCase):
         tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=p2pkh_script(h160)))
         h160 = decode_base58('mnrVtF8DWjMu839VW3rBfgYaAfKk8983Xf')
         tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=p2pkh_script(h160)))
-
         tx = Tx(1, tx_ins, tx_outs, 0, testnet=True)
         self.assertTrue(tx.sign_input(0, private_key))
 

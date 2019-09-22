@@ -127,19 +127,16 @@ def read_varstr(s):
     '''reads a variable string from a stream'''
     # remember that s.read(n) will read n bytes from the stream
     # find the length of the string by using read_varint on the string
-    item_length = read_varint(s)
     # read that many bytes from the stream
-    return s.read(item_length)
+    raise NotImplementedError
 
 
 def encode_varstr(b):
     '''encodes bytes as a varstr'''
     # encode the length of the string using encode_varint
-    result = encode_varint(len(b))
     # add the bytes
-    result += b
     # return the whole thing
-    return result
+    raise NotImplementedError
 
 
 def h160_to_p2pkh_address(h160, testnet=False):

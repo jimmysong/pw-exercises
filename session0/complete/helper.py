@@ -1,3 +1,4 @@
+from io import BytesIO
 from unittest import TestCase, TestSuite, TextTestRunner
 
 import hashlib
@@ -124,6 +125,7 @@ def encode_varint(i):
 
 def read_varstr(s):
     '''reads a variable string from a stream'''
+    # remember that s.read(n) will read n bytes from the stream
     # find the length of the string by using read_varint on the string
     item_length = read_varint(s)
     # read that many bytes from the stream
@@ -378,3 +380,10 @@ class HelperTest(TestCase):
         want = '4000600a080000010940'
         self.assertEqual(bit_field_to_bytes(bit_field).hex(), want)
         self.assertEqual(bytes_to_bit_field(bytes.fromhex(want)), bit_field)
+
+    def test_varstr(self):
+        to_encode = b'hello'
+        want = b'\x05hello'
+        self.assertEqual(encode_varstr(to_encode), want)
+        stream = BytesIO(want)
+        self.assertEqual(read_varstr(stream), to_encode)
