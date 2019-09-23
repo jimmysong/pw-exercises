@@ -2,44 +2,31 @@ from io import BytesIO
 from unittest import TestCase
 
 from helper import (
-    bits_to_target,
     hash256,
     int_to_little_endian,
     little_endian_to_int,
     merkle_root,
-    read_varint
+    read_varint,
 )
 from tx import Tx
 
 
-GENESIS_BLOCK_HEADER = bytes.fromhex('0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c')
-TESTNET_GENESIS_BLOCK_HEADER = bytes.fromhex('0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff001d1aa4ae18')
-LOWEST_BITS = bytes.fromhex('ffff001d')
+GENESIS_BLOCK_HASH = bytes.fromhex('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f')
+TESTNET_GENESIS_BLOCK_HASH = bytes.fromhex('000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943')
 
 
 class Block:
     command = b'block'
 
-    def __init__(self, version, prev_block, merkle_root,
-                 timestamp, bits, nonce, txs=None, tx_hashes=None):
+    def __init__(self, version, prev_block, merkle_root, timestamp, bits, nonce, tx_hashes=None):
         self.version = version
         self.prev_block = prev_block
         self.merkle_root = merkle_root
         self.timestamp = timestamp
         self.bits = bits
         self.nonce = nonce
-        self.txs = txs
         self.tx_hashes = tx_hashes
-
-    def __repr__(self):
-        return 'hash: {}\nversion: {}\nprevious: {}\nmerkle_root: {}\n' \
-            'timestamp: {}\ndifficulty: {}\n'.format(
-                self.id(), self.version, self.prev_block.hex(),
-                self.merkle_root.hex(), self.timestamp, self.difficulty(),
-            )
-
-    def id(self):
-        return self.hash().hex()
+        self.merkle_tree = None
 
     @classmethod
     def parse_header(cls, s):
@@ -64,12 +51,11 @@ class Block:
     def parse(cls, s):
         b = cls.parse_header(s)
         num_txs = read_varint(s)
-        b.txs = []
-        b.tx_hashes = []
+        tx_hashes = []
         for _ in range(num_txs):
             t = Tx.parse(s)
-            b.txs.append(t)
-            b.tx_hashes.append(t.hash())
+            tx_hashes.append(t.hash())
+        b.tx_hashes = tx_hashes
         return b
 
     def serialize(self):
@@ -97,6 +83,10 @@ class Block:
         # reverse
         return h256[::-1]
 
+    def id(self):
+        '''Human-readable hexadecimal of the block hash'''
+        return self.hash().hex()
+
     def bip9(self):
         '''Returns whether this block is signaling readiness for BIP9'''
         # BIP9 is signalled if the top 3 bits are 001
@@ -118,7 +108,13 @@ class Block:
 
     def target(self):
         '''Returns the proof-of-work target based on the bits'''
-        return bits_to_target(self.bits)
+        # last byte is exponent
+        exponent = self.bits[-1]
+        # the first three bytes are the coefficient in little endian
+        coefficient = little_endian_to_int(self.bits[:-1])
+        # the formula is:
+        # coefficient * 256**(exponent-3)
+        return coefficient * 256**(exponent - 3)
 
     def difficulty(self):
         '''Returns the block difficulty based on the bits'''
@@ -140,20 +136,14 @@ class Block:
         '''Gets the merkle root of the tx_hashes and checks that it's
         the same as the merkle root of this block.
         '''
-        # reverse each item in self.tx_hashes
+        # reverse all the transaction hashes (self.tx_hashes)
         hashes = [h[::-1] for h in self.tx_hashes]
-        # compute the Merkle Root and reverse
-        root = merkle_root(hashes)[::-1]
-        # return whether self.merkle_root is the same
-        return root == self.merkle_root
-
-    def get_outpoints(self):
-        if not self.txs:
-            return []
-        for t in self.txs:
-            for tx_out in t.tx_outs:
-                if not tx_out.script_pubkey.has_op_return():
-                    yield (tx_out.script_pubkey.raw_serialize())
+        # get the Merkle Root
+        root = merkle_root(hashes)
+        # reverse the Merkle Root
+        # return whether self.merkle root is the same as
+        # the reverse of the calculated merkle root
+        return root[::-1] == self.merkle_root
 
 
 class BlockTest(TestCase):
@@ -170,9 +160,6 @@ class BlockTest(TestCase):
         self.assertEqual(block.timestamp, 0x59a7771e)
         self.assertEqual(block.bits, bytes.fromhex('e93c0118'))
         self.assertEqual(block.nonce, bytes.fromhex('a4ffd71d'))
-        self.assertEqual(block.id(), '0000000000000000007e9e4c586439b0cdbe13b1370bdd9435d76a644d047523')
-        self.assertEqual([b for b in block.get_outpoints()], [])
-        self.assertTrue(block.id() in block.__repr__())
 
     def test_serialize(self):
         block_raw = bytes.fromhex('020000208ec39428b17323fa0ddec8e887b4a7c53b8c0a0a220cfd0000000000000000005b0750fce0a889502d40508d39576821155e9c9e3f5c3157f961db38fd8b25be1e77a759e93c0118a4ffd71d')
@@ -221,12 +208,6 @@ class BlockTest(TestCase):
         stream = BytesIO(block_raw)
         block = Block.parse_header(stream)
         self.assertEqual(block.target(), 0x13ce9000000000000000000000000000000000000000000)
-        self.assertEqual(int(block.difficulty()), 888171856257)
-
-    def test_difficulty(self):
-        block_raw = bytes.fromhex('020000208ec39428b17323fa0ddec8e887b4a7c53b8c0a0a220cfd0000000000000000005b0750fce0a889502d40508d39576821155e9c9e3f5c3157f961db38fd8b25be1e77a759e93c0118a4ffd71d')
-        stream = BytesIO(block_raw)
-        block = Block.parse_header(stream)
         self.assertEqual(int(block.difficulty()), 888171856257)
 
     def test_check_pow(self):
