@@ -1,4 +1,8 @@
 '''
+#code
+>>> import ecc, tx
+
+#endcode
 #unittest
 tx:TxTest:test_parse_segwit:
 #endunittest
@@ -8,6 +12,72 @@ tx:TxTest:test_serialize_segwit:
 #unittest
 tx:TxTest:test_sig_hash_bip143:
 #endunittest
+#code
+>>> # example for creating a bech32 address
+>>> from ecc import S256Point
+>>> from helper import encode_bech32_checksum, encode_varstr
+>>> sec_hex = '039d5ca49670cbe4c3bfa84c96a8c87df086c6ea6a24ba6b809c9de234496808d5'
+>>> point = S256Point.parse(bytes.fromhex(sec_hex))
+>>> h160 = point.hash160()
+>>> raw = b'\x00'
+>>> raw += encode_varstr(h160)
+>>> bech32 = encode_bech32_checksum(raw, testnet=False)
+>>> print(bech32)
+bc1qttnpu7attc248hz22jxtyaqkfc7z4qd8yk882v
+
+#endcode
+#exercise
+#### Create a testnet bech32 address using your private key from the Session 0
+
+Fill in the spreadsheet with your bech32 address.
+---
+>>> from ecc import PrivateKey
+>>> from helper import encode_bech32_checksum, encode_varstr, hash256, little_endian_to_int
+>>> # use the same passphrase from session 0
+>>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
+>>> secret = little_endian_to_int(hash256(passphrase))
+>>> # create a private key using the secret
+>>> private_key = PrivateKey(secret)  #/
+>>> # get the public key using the .point property
+>>> public_key = private_key.point  #/
+>>> # get the hash160 of the point
+>>> h160 = public_key.hash160()  #/
+>>> # the raw bytes to be encrypted starts with the segwit version (0 or b'\x00)
+>>> raw = b'\x00'  #/
+>>> # next, add the hash160 using encode_varstr
+>>> raw += encode_varstr(h160)  #/
+>>> # encode to bech32 using encode_bech32_checksum, remember testnet=True
+>>> bech32 = encode_bech32_checksum(raw, testnet=True)  #/
+>>> # print the address
+>>> print(bech32)  #/
+tb1qgqd0pdtu0f9hfyx9pzj86p686q70dtpwkmp0yw
+
+#endexercise
+#unittest
+ecc:S256Test:test_address:
+#endunittest
+#code
+>>> # Example for signing a p2wpkh input
+>>> from io import BytesIO
+>>> from ecc import PrivateKey
+>>> from helper import hash256, little_endian_to_int, SIGHASH_ALL
+>>> from tx import Tx
+>>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
+>>> raw_tx_hex = '01000000000101cca99b60e1d687e8faaf93e114114e7b5f6382d9f5d45ffb76ac7472ad7d734c0100000000ffffffff014c400f0000000000160014092ab91b37b4182061d9c01199aaac029f89561f0000000000'
+>>> input_index = 0
+>>> stream = BytesIO(bytes.fromhex(raw_tx_hex))
+>>> tx_obj = Tx.parse(stream)
+>>> z = tx_obj.sig_hash_bip143(input_index)
+>>> der = private_key.sign(z).der()
+>>> sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+>>> sec = private_key.point.sec()
+>>> tx_in = tx_obj.tx_ins[input_index]
+>>> tx_in.witness = [sig, sec]
+>>> print(tx_obj.verify_input(input_index))
+True
+
+#endcode
+
 '''
 
 

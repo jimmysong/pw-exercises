@@ -147,7 +147,7 @@ def encode_bech32(nums):
 
 
 def encode_bech32_checksum(s, testnet=False):
-    '''Convert a witness program to a bech32 address'''
+    '''Convert a segwit ScriptPubKey to a bech32 address'''
     if testnet:
         prefix = 'tb'
     else:

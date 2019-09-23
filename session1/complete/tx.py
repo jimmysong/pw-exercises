@@ -173,7 +173,7 @@ class Tx:
                 # read the item using read_varstr
                 item = read_varstr(s)
                 # add the item to the witness array
-                tx_in.append(item)
+                tx_in.witness.append(item)
         # locktime is 4 bytes, little-endian
         locktime = little_endian_to_int(s.read(4))
         # return an instance of the class (cls(...))
@@ -322,23 +322,30 @@ class Tx:
     def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
         '''Returns the integer representation of the hash that needs to get
         signed for index input_index'''
+        # grab the input being signed by looking up the input_index
         tx_in = self.tx_ins[input_index]
-        # per BIP143 spec
+        # start with the version in 4 bytes, little endian
         s = int_to_little_endian(self.version, 4)
+        # add the HashPrevouts and HashSequence
         s += self.hash_prevouts() + self.hash_sequence()
-        s += tx_in.prev_tx[::-1] + int_to_little_endian(tx_in.prev_index, 4)
-        if witness_script:
-            script_code = witness_script.serialize()
-        elif redeem_script:
-            script_code = p2pkh_script(redeem_script.commands[1]).serialize()
-        else:
-            script_code = p2pkh_script(tx_in.script_pubkey(self.testnet).commands[1]).serialize()
-        s += script_code
+        # add the previous transaction hash in little endian
+        s += tx_in.prev_tx[::-1]
+        # add the previous transaction index in 4 bytes, little endian
+        s += int_to_little_endian(tx_in.prev_index, 4)
+        # add the p2pkh script equivalent by getting the ScriptPubKey's 2nd command
+        #  and use that to create a p2pkh_script and serialize afterwards
+        s += p2pkh_script(tx_in.script_pubkey(self.testnet).commands[1]).serialize()
+        # add the value of the input in 8 bytes, little endian
         s += int_to_little_endian(tx_in.value(), 8)
+        # add the sequence of the input in 4 bytes, little endian
         s += int_to_little_endian(tx_in.sequence, 4)
+        # add the HashOutputs
         s += self.hash_outputs()
+        # add the locktime in 4 bytes, little endian
         s += int_to_little_endian(self.locktime, 4)
+        # add the sighash (SIGHASH_ALL) in 4 bytes, little endian
         s += int_to_little_endian(SIGHASH_ALL, 4)
+        # hash256 the whole thing, interpret the as a big endian integer using int.from_bytes(x, 'big')
         return int.from_bytes(hash256(s), 'big')
 
     def verify_input(self, input_index):
@@ -612,8 +619,24 @@ class TxTest(TestCase):
         tx = Tx.parse(stream)
         self.assertEqual(tx.locktime, 410393)
 
+    def test_parse_segwit(self):
+        raw_tx = bytes.fromhex('01000000000101c70c4ede5731f1b47a89d133be9244927fa12e15778ec78a7e071273c0c58a870400000000ffffffff02809698000000000017a9144f34d55c56f827169921df008e8dfdc23678fc1787d464da1f00000000220020701a8d401c84fb13e6baf169d59684e17abd9fa216c8cc5b9fc63d622ff8c58d0400473044022050a5a50e78e6f9c65b5d94c78f8e4b339848456ff7c2231702b4a37439e2a3bd02201569cbf1c672bbb1608d6e9feea28705d8d6e54aa51d9fa396469be6ffc83c2d0147304402200b69a83cc3e3e1694037ef639049b0ece00f15718a03e9038aa42ac9d1bd0ea50220780c510821cd5205e5d178e6277005f4dd61a7fcccd4f8fae9e2d2adc355e728016952210375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c2103a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff2103c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f88053ae00000000')
+        stream = BytesIO(raw_tx)
+        tx = Tx.parse(stream)
+        self.assertTrue(tx.segwit)
+        self.assertEqual(tx.version, 1)
+        self.assertEqual(tx.tx_ins[0].prev_index, 4)
+        self.assertEqual(tx.tx_outs[0].amount, 10000000)
+        self.assertEqual(tx.locktime, 0)
+
     def test_serialize(self):
         raw_tx = bytes.fromhex('0100000001813f79011acb80925dfe69b3def355fe914bd1d96a3f5f71bf8303c6a989c7d1000000006b483045022100ed81ff192e75a3fd2304004dcadb746fa5e24c5031ccfcf21320b0277457c98f02207a986d955c6e0cb35d446a89d3f56100f4d7f67801c31967743a9c8e10615bed01210349fc4e631e3624a545de3f89f5d8684c7b8138bd94bdd531d2e213bf016b278afeffffff02a135ef01000000001976a914bc3b654dca7e56b04dca18f2566cdaf02e8d9ada88ac99c39800000000001976a9141c4bc762dd5423e332166702cb75f40df79fea1288ac19430600')
+        stream = BytesIO(raw_tx)
+        tx = Tx.parse(stream)
+        self.assertEqual(tx.serialize(), raw_tx)
+
+    def test_serialize_segwit(self):
+        raw_tx = bytes.fromhex('01000000000101c70c4ede5731f1b47a89d133be9244927fa12e15778ec78a7e071273c0c58a870400000000ffffffff02809698000000000017a9144f34d55c56f827169921df008e8dfdc23678fc1787d464da1f00000000220020701a8d401c84fb13e6baf169d59684e17abd9fa216c8cc5b9fc63d622ff8c58d0400473044022050a5a50e78e6f9c65b5d94c78f8e4b339848456ff7c2231702b4a37439e2a3bd02201569cbf1c672bbb1608d6e9feea28705d8d6e54aa51d9fa396469be6ffc83c2d0147304402200b69a83cc3e3e1694037ef639049b0ece00f15718a03e9038aa42ac9d1bd0ea50220780c510821cd5205e5d178e6277005f4dd61a7fcccd4f8fae9e2d2adc355e728016952210375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c2103a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff2103c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f88053ae00000000')
         stream = BytesIO(raw_tx)
         tx = Tx.parse(stream)
         self.assertEqual(tx.serialize(), raw_tx)
@@ -649,6 +672,13 @@ class TxTest(TestCase):
         want = int('27e0c5994dec7824e56dec6b2fcb342eb7cdb0d0957c2fce9882f715e85d81a6', 16)
         self.assertEqual(tx.sig_hash(0), want)
 
+    def test_sig_hash_bip143(self):
+        raw_tx = bytes.fromhex('0100000000010115e180dc28a2327e687facc33f10f2a20da717e5548406f7ae8b4c811072f8560100000000ffffffff0100b4f505000000001976a9141d7cd6c75c2e86f4cbf98eaed221b30bd9a0b92888ac02483045022100df7b7e5cda14ddf91290e02ea10786e03eb11ee36ec02dd862fe9a326bbcb7fd02203f5b4496b667e6e281cc654a2da9e4f08660c620a1051337fa8965f727eb19190121038262a6c6cec93c2d3ecd6c6072efea86d02ff8e3328bbd0242b20af3425990ac00000000')
+        stream = BytesIO(raw_tx)
+        tx = Tx.parse(stream, testnet=True)
+        want = int('12bb9e0988736b8d1c3a180acd828b8a7eddae923a6a4bf0b4c14c40cd7327d1', 16)
+        self.assertEqual(tx.sig_hash(0), want)
+
     def test_verify_p2pkh(self):
         tx = TxFetcher.fetch('452c629d67e41baec3ac6f04fe744b4b9617f8f859c63b3002f8684e7a4fee03')
         self.assertTrue(tx.verify())
@@ -661,18 +691,6 @@ class TxTest(TestCase):
 
     def test_verify_p2wpkh(self):
         tx = TxFetcher.fetch('d869f854e1f8788bcff294cc83b280942a8c728de71eb709a2c29d10bfe21b7c', testnet=True)
-        self.assertTrue(tx.verify())
-
-    def test_verify_p2sh_p2wpkh(self):
-        tx = TxFetcher.fetch('c586389e5e4b3acb9d6c8be1c19ae8ab2795397633176f5a6442a261bbdefc3a')
-        self.assertTrue(tx.verify())
-
-    def test_verify_p2wsh(self):
-        tx = TxFetcher.fetch('78457666f82c28aa37b74b506745a7c7684dc7842a52a457b09f09446721e11c', testnet=True)
-        self.assertTrue(tx.verify())
-
-    def test_verify_p2sh_p2wsh(self):
-        tx = TxFetcher.fetch('954f43dbb30ad8024981c07d1f5eb6c9fd461e2cf1760dd1283f052af746fc88', testnet=True)
         self.assertTrue(tx.verify())
 
     def test_sign_p2pkh(self):
