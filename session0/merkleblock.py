@@ -216,7 +216,7 @@ class MerkleBlock:
 
     def id(self):
         return self.header.id()
-        
+
     @classmethod
     def parse(cls, s):
         '''Takes a byte stream and parses a merkle block. Returns a Merkle Block object'''
