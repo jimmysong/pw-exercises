@@ -66,7 +66,7 @@ ecc:S256Test:test_address:
 >>> raw_tx_hex = '01000000000101cca99b60e1d687e8faaf93e114114e7b5f6382d9f5d45ffb76ac7472ad7d734c0100000000ffffffff014c400f0000000000160014092ab91b37b4182061d9c01199aaac029f89561f0000000000'
 >>> input_index = 0
 >>> stream = BytesIO(bytes.fromhex(raw_tx_hex))
->>> tx_obj = Tx.parse(stream)
+>>> tx_obj = Tx.parse(stream, testnet=True)
 >>> z = tx_obj.sig_hash_bip143(input_index)
 >>> der = private_key.sign(z).der()
 >>> sig = der + SIGHASH_ALL.to_bytes(1, 'big')
@@ -77,7 +77,9 @@ ecc:S256Test:test_address:
 True
 
 #endcode
-
+#unittest
+tx:TxTest:test_sign_p2wpkh:
+#endunittest
 '''
 
 

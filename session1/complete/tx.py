@@ -418,6 +418,21 @@ class Tx:
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
 
+    def sign_p2wpkh(self, input_index, private_key):
+        '''Signs the input assuming that the previous output is a p2pkh using the private key'''
+        # get the sig hash (z) using the bip143 serialization
+        z = self.sig_hash_bip143(input_index)
+        # get der signature of z from private key
+        der = private_key.sign(z).der()
+        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
+        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # calculate the sec
+        sec = private_key.point.sec()
+        # change input's witness to be an array of signature and sec pub key
+        self.tx_ins[input_index].witness = [sig, sec]
+        # return whether sig is valid using self.verify_input
+        return self.verify_input(input_index)
+
     def sign_input(self, input_index, private_key):
         '''Signs the input by figuring out what type of ScriptPubKey the previous output was'''
         # get the input
@@ -705,6 +720,20 @@ class TxTest(TestCase):
         tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=p2pkh_script(h160)))
         tx = Tx(1, tx_ins, tx_outs, 0, testnet=True)
         self.assertTrue(tx.sign_p2pkh(0, private_key))
+
+    def test_sign_p2wpkh(self):
+        private_key = PrivateKey(secret=8675309)
+        prev_tx = bytes.fromhex('6bfa079532dd9fad6cfbf218edc294fdfa7dd0cb3956375bc864577fb36fad97')
+        prev_index = 0
+        fee = 500
+        tx_in = TxIn(prev_tx, prev_index)
+        amount = tx_in.value(testnet=True) - fee
+        h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
+        tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
+        t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
+        self.assertTrue(t.sign_p2wpkh(0, private_key))
+        want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
+        self.assertEqual(t.serialize_segwit().hex(), want)
 
     def test_sign_input(self):
         private_key = PrivateKey(secret=8675309)

@@ -723,7 +723,7 @@ class TxTest(TestCase):
 
     def test_sign_p2wpkh(self):
         private_key = PrivateKey(secret=8675309)
-        prev_tx = bytes.fromhex('15298dc29fccc3ce2f96126a606daa29a8f68fc5906ed859d23dfb517549aa6e')
+        prev_tx = bytes.fromhex('6bfa079532dd9fad6cfbf218edc294fdfa7dd0cb3956375bc864577fb36fad97')
         prev_index = 0
         fee = 500
         tx_in = TxIn(prev_tx, prev_index)
@@ -732,7 +732,7 @@ class TxTest(TestCase):
         tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         self.assertTrue(t.sign_p2wpkh(0, private_key))
-        want = '010000000001016eaa497551fb3dd259d86e90c58ff6a829aa6d606a12962fcec3cc9fc28d29150000000000ffffffff01acb90d00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100fef646cee85870f841c32b2bd4b01f4aef10be0553c081c2636437f1df4fd0a20220079f0931d19ff3bc119f6c2fb7ef2a3e261b2db8c7c6ed51106a0edf1257d911012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
+        want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
         self.assertEqual(t.serialize_segwit().hex(), want)
 
     def test_sign_input(self):
