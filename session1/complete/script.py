@@ -4,8 +4,10 @@ from unittest import TestCase
 from helper import (
     decode_base58,
     encode_varint,
+    encode_varstr,
     h160_to_p2pkh_address,
     h160_to_p2sh_address,
+    hash160,
     int_to_little_endian,
     little_endian_to_int,
     read_varint,
@@ -140,10 +142,8 @@ class Script:
     def serialize(self):
         # get the raw serialization (no prepended length)
         result = self.raw_serialize()
-        # get the length of the whole thing
-        total = len(result)
-        # encode_varint the total length of the result and prepend
-        return encode_varint(total) + result
+        # encode_varstr the result
+        return encode_varstr(result)
 
     def evaluate(self, z, witness):
         # create a copy as we may need to add to this list if we have a
@@ -185,7 +185,7 @@ class Script:
                 if len(commands) == 3 and commands[0] == 0xa9 \
                     and type(commands[1]) == bytes and len(commands[1]) == 20 \
                     and commands[2] == 0x87:
-                    redeem_script = encode_varint(len(command)) + command
+                    redeem_script = encode_varstr(command)
                     # we execute the next three op codes
                     commands.pop()
                     h160 = commands.pop()
@@ -197,7 +197,7 @@ class Script:
                         return False
                     # final result should be a 1
                     if not op_verify(stack):
-                        print('bad p2sh h160')
+                        print('bad p2sh h160 {} {} vs {}'.format(redeem_script.hex(), h160.hex(), hash160(redeem_script).hex()))
                         return False
                     # hashes match! now add the RedeemScript
                     stream = BytesIO(redeem_script)

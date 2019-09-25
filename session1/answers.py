@@ -208,7 +208,7 @@ ecc:S256Test:test_p2sh_p2wpkh_address:
 >>> from tx import Tx
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
->>> raw_tx_hex = '0100000000010100e959ad7b92ec15f72b7c2b2f5511990e22fa2a3e8ced67cbea5ad13a82b5020000000000ffffffff014c400f0000000000160014401af0b57c7a4b7490c508a47d0747d03cf6ac2e0000000000'
+>>> raw_tx_hex = '010000000001014e6b786f3cd70ab1ffd75caa6bb252c9888fdca9ca94d40fec24bec3e643d89e0000000000ffffffff014c400f0000000000160014401af0b57c7a4b7490c508a47d0747d03cf6ac2e0000000000'
 >>> input_index = 0
 >>> stream = BytesIO(bytes.fromhex(raw_tx_hex))
 >>> tx_obj = Tx.parse(stream, testnet=True)
@@ -218,7 +218,7 @@ ecc:S256Test:test_p2sh_p2wpkh_address:
 >>> sec = private_key.point.sec()
 >>> tx_in = tx_obj.tx_ins[input_index]
 >>> tx_in.witness = [sig, sec]
->>> tx_in.script_sig = Script([redeem_script.serialize()])
+>>> tx_in.script_sig = Script([redeem_script.raw_serialize()])
 >>> print(tx_obj.verify_input(input_index))
 True
 
@@ -289,8 +289,13 @@ def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
     s += self.hash_prevouts() + self.hash_sequence()
     s += tx_in.prev_tx[::-1]
     s += int_to_little_endian(tx_in.prev_index, 4)
-    s += p2pkh_script(tx_in.script_pubkey(self.testnet).commands[1]).serialize()
-    s += int_to_little_endian(tx_in.value(), 8)
+    if redeem_script:
+        h160 = redeem_script.commands[1]
+    else:
+        script_pubkey = tx_in.script_pubkey(self.testnet)
+        h160 = script_pubkey.commands[1]
+    s += p2pkh_script(h160).serialize()
+    s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
     s += int_to_little_endian(tx_in.sequence, 4)
     s += self.hash_outputs()
     s += int_to_little_endian(self.locktime, 4)

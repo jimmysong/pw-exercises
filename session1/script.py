@@ -197,7 +197,7 @@ class Script:
                         return False
                     # final result should be a 1
                     if not op_verify(stack):
-                        print('bad p2sh h160 {} {} vs {}'.format(redeem_script.hex(), h160.hex(), hash160(redeem_script).hex()))
+                        print('bad p2sh h160 {} {} vs {}'.format(redeem_script.hex(), h160.hex(), hash160(command).hex()))
                         return False
                     # hashes match! now add the RedeemScript
                     stream = BytesIO(redeem_script)

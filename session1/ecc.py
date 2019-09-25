@@ -476,8 +476,8 @@ class S256Point(Point):
     
     def p2sh_p2wpkh_address(self, testnet=False):
         '''Returns the p2sh-p2wpkh base58 address string'''
-        # serialize the RedeemScript
-        bin_redeem_script = self.p2sh_p2wpkh_redeem_script().serialize()
+        # raw_serialize the RedeemScript
+        bin_redeem_script = self.p2sh_p2wpkh_redeem_script().raw_serialize()
         # get the hash160 of the serialized RedeemScript
         h160 = hash160(bin_redeem_script)
         # convert the h160 to a p2sh address using h160_to_p2sh_address function
