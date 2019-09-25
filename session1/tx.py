@@ -332,9 +332,17 @@ class Tx:
         s += tx_in.prev_tx[::-1]
         # add the previous transaction index in 4 bytes, little endian
         s += int_to_little_endian(tx_in.prev_index, 4)
-        # add the p2pkh script equivalent by getting the ScriptPubKey's 2nd command
-        #  and use that to create a p2pkh_script and serialize afterwards
-        s += p2pkh_script(tx_in.script_pubkey(self.testnet).commands[1]).serialize()
+        # for p2wpkh, we need the previous script pubkey
+        # Exercise 8: for p2sh-p2wpkh, it's the second command of the redeem script
+        if redeem_script:
+            h160 = redeem_script.commands[1]
+        else:
+            # get the script pubkey associated with the previous output (remember testnet)
+            script_pubkey = tx_in.script_pubkey(self.testnet)
+            # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
+            h160 = script_pubkey.commands[1]
+        # turn the hash160 into the serialized p2pkh script and add it
+        s += p2pkh_script(h160).serialize()
         # add the value of the input in 8 bytes, little endian
         s += int_to_little_endian(tx_in.value(), 8)
         # add the sequence of the input in 4 bytes, little endian
@@ -359,8 +367,7 @@ class Tx:
             # the last command has to be the redeem script to trigger
             command = tx_in.script_sig.commands[-1]
             # parse the redeem script
-            raw_redeem = int_to_little_endian(len(command), 1) + command
-            redeem_script = Script.parse(BytesIO(raw_redeem))
+            redeem_script = Script.parse(BytesIO(encode_varstr(command)))
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh_script_pubkey():
                 z = self.sig_hash_bip143(input_index, redeem_script)
@@ -433,7 +440,30 @@ class Tx:
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
 
-    def sign_input(self, input_index, private_key):
+    def sign_p2sh_p2wpkh(self, input_index, private_key):
+        '''Signs the input assuming that the previous output is a p2pkh using the private key'''
+        # grab the input
+        tx_in = self.tx_ins[input_index]
+        # the RedeemScript can be computed from the public key
+        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
+        # create a new script with the serialized RedeemScript as the only command
+        script_sig = Script([redeem_script.serialize()])
+        # set the ScriptSig of the input to be this new script
+        tx_in.script_sig = script_sig
+        # get the sig hash (z) using the bip143 serialization, pass in the RedeemScript
+        z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
+        # get der signature of z from private key
+        der = private_key.sign(z).der()
+        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
+        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # calculate the sec
+        sec = private_key.point.sec()
+        # change input's witness to be an array of signature and sec pub key
+        self.tx_ins[input_index].witness = [sig, sec]
+        # return whether sig is valid using self.verify_input
+        return self.verify_input(input_index)
+
+    def sign_input(self, input_index, private_key, redeem_script=None):
         '''Signs the input by figuring out what type of ScriptPubKey the previous output was'''
         # get the input
         tx_in = self.tx_ins[input_index]
@@ -442,6 +472,10 @@ class Tx:
         # if the script_pubkey is p2pkh (use is_p2pkh_script_pubkey), send to sign_p2pkh
         if script_pubkey.is_p2pkh_script_pubkey():
             return self.sign_p2pkh(input_index, private_key)
+        elif script_pubkey.is_p2wpkh_script_pubkey():
+            return self.sign_p2wpkh(input_index, private_key)
+        elif redeem_script and redeem_script.is_p2wpkh_script_pubkey():
+            return self.sign_p2sh_p2wpkh(input_index, private_key)
         # else return a RuntimeError
         else:
             raise RuntimeError('Unknown ScriptPubKey')
@@ -708,6 +742,10 @@ class TxTest(TestCase):
         tx = TxFetcher.fetch('d869f854e1f8788bcff294cc83b280942a8c728de71eb709a2c29d10bfe21b7c', testnet=True)
         self.assertTrue(tx.verify())
 
+    def test_verify_p2sh_p2wpkh(self):
+        tx = TxFetcher.fetch('c586389e5e4b3acb9d6c8be1c19ae8ab2795397633176f5a6442a261bbdefc3a')
+        self.assertTrue(tx.verify())
+
     def test_sign_p2pkh(self):
         private_key = PrivateKey(secret=8675309)
         tx_ins = []
@@ -731,9 +769,26 @@ class TxTest(TestCase):
         h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
         tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
-        self.assertTrue(t.sign_p2wpkh(0, private_key))
+        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
+        self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
         want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
-        self.assertEqual(t.serialize_segwit().hex(), want)
+        self.assertEqual(t.serialize().hex(), want)
+
+    def test_sign_p2sh_p2wpkh(self):
+        private_key = PrivateKey(secret=8675309)
+        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
+        prev_tx = bytes.fromhex('1228df2c3bfe9b99f3798cce7b21c0d404886e9ffe1a4085b1cb32e91817fb33')
+        prev_index = 0
+        fee = 500
+        tx_obj = Tx.parse(stream)
+        tx_in = TxIn(prev_tx, prev_index)
+        amount = tx_in.value(testnet=True) - fee
+        h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
+        tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
+        t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
+        self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
+        want = '0100000000010133fb1718e932cbb185401afe9f6e8804d4c0217bce8c79f3999bfe3b2cdf2812000000001817160014d52ad7ca9b3d096a38e752c2018e6fbc40cdf26fffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac024830450221008ea76a87b8de3724a557bd7f8250e1deff59230efd48a438263139f3231105520220214571c8f05f69537c0f10c1ceb423481b4db234bf8b05489d13e61e87fec74b012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
+        self.assertEqual(t.serialize().hex(), want)
 
     def test_sign_input(self):
         private_key = PrivateKey(secret=8675309)

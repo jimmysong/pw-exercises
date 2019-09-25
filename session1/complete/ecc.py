@@ -9,6 +9,8 @@ from helper import (
     encode_base58_checksum,
     encode_bech32_checksum,
     encode_varstr,
+    h160_to_p2pkh_address,
+    h160_to_p2sh_address,
     hash160,
     hash256,
 )
@@ -453,13 +455,7 @@ class S256Point(Point):
     def address(self, compressed=True, testnet=False):
         '''Returns the p2pkh address string'''
         h160 = self.hash160(compressed)
-        # raw is hash 160 prepended w/ b'\x00' for mainnet, b'\x6f' for testnet
-        if testnet:
-            prefix = b'\x6f'
-        else:
-            prefix = b'\x00'
-        # return the encode_base58_checksum of the prefix and h160
-        return encode_base58_checksum(prefix + h160)
+        return h160_to_p2pkh_address(h160, testnet)
 
     def bech32_address(self, testnet=False):
         '''Returns the p2wpkh bech32 address string'''
@@ -470,6 +466,23 @@ class S256Point(Point):
         # return the encode_bech32_checksum of the raw witness program
         # remember to pass in testnet
         return encode_bech32_checksum(raw, testnet)
+
+    def p2sh_p2wpkh_redeem_script(self):
+        '''Returns the RedeemScript for the p2sh-p2wpkh address'''
+        from script import Script  # avoid circular dependency
+        # the RedeemScript is the witness program (0, hash160)
+        redeem_script = Script([0, self.hash160()])
+        return redeem_script
+    
+    def p2sh_p2wpkh_address(self, testnet=False):
+        '''Returns the p2sh-p2wpkh base58 address string'''
+        # raw_serialize the RedeemScript
+        raw_redeem_script = self.p2sh_p2wpkh_redeem_script().raw_serialize()
+        # get the hash160 of the serialized RedeemScript
+        h160 = hash160(raw_redeem_script)
+        # convert the h160 to a p2sh address using h160_to_p2sh_address function
+        # remember to pass in testnet
+        return h160_to_p2sh_address(h160, testnet)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking
@@ -573,34 +586,74 @@ class S256Test(TestCase):
                 888**3,
                 '148dY81A9BmdpMhvYEVznrM45kWN32vSCN',
                 'mnabU9NCcRE5zcNZ2C16CnvKPELrFvisn3',
-                'bc1qyfvunnpszmjwcqgfk9dsne6j4edq3fglx9y5x7',
-                'tb1qyfvunnpszmjwcqgfk9dsne6j4edq3fglvrl8ad',
             ),
             (
                 321,
                 '1FNgueDbMYjNQ8HT77sHKxTwdrHMdTGwyN',
                 'mfx3y63A7TfTtXKkv7Y6QzsPFY6QCBCXiP',
-                'bc1qnk4u7vkat6ck9t4unlgvvle8dhsqp40mrssamm',
-                'tb1qnk4u7vkat6ck9t4unlgvvle8dhsqp40mfktwqg',
             ),
             (
                 4242424242,
                 '1HUYfVCXEmp76uh17bE2gA72Vuqv4wrM1a',
                 'mgY3bVusRUL6ZB2Ss999CSrGVbdRwVpM8s',
-                'bc1qkjm6e3c79zy7clsfx86q4pvy46ccc5u9xa6f6e',
-                'tb1qkjm6e3c79zy7clsfx86q4pvy46ccc5u9vmp6p2',
             ),
         )
-        for secret, mainnet_legacy, testnet_legacy, mainnet_bech32, testnet_bech32 in tests:
+        for secret, mainnet_legacy, testnet_legacy in tests:
             point = secret * G
             self.assertEqual(
                 point.address(testnet=False), mainnet_legacy)
             self.assertEqual(
                 point.address(compressed=False, testnet=True), testnet_legacy)
+
+    def test_bech32_address(self):
+        tests = (
+            (
+                888**3,
+                'bc1qyfvunnpszmjwcqgfk9dsne6j4edq3fglx9y5x7',
+                'tb1qyfvunnpszmjwcqgfk9dsne6j4edq3fglvrl8ad',
+            ),
+            (
+                321,
+                'bc1qnk4u7vkat6ck9t4unlgvvle8dhsqp40mrssamm',
+                'tb1qnk4u7vkat6ck9t4unlgvvle8dhsqp40mfktwqg',
+            ),
+            (
+                4242424242,
+                'bc1qkjm6e3c79zy7clsfx86q4pvy46ccc5u9xa6f6e',
+                'tb1qkjm6e3c79zy7clsfx86q4pvy46ccc5u9vmp6p2',
+            ),
+        )
+        for secret, mainnet_bech32, testnet_bech32 in tests:
+            point = secret * G
             self.assertEqual(
                 point.bech32_address(testnet=False), mainnet_bech32)
             self.assertEqual(
                 point.bech32_address(testnet=True), testnet_bech32)
+
+    def test_p2sh_p2wpkh_address(self):
+        tests = (
+            (
+                888**3,
+                '32cE3VHX5k1Z4gDCJBXMSLgd1akUzvqNvH',
+                '2MtAS7EDYhCWuGTqjyK9E4HftDvxek7ELQn',
+            ),
+            (
+                321,
+                '3KPpFmmGNoKi5ikrH4QsMNmNnQtzkdw4Kx',
+                '2NAx2KWhHzFq4HWPPxC2jyKkdzm7AVsEge4',
+            ),
+            (
+                4242424242,
+                '3M7oCrExZ6ZYjyn2oxXxYnE14m813espco',
+                '2NCg1GbAzAZ4twmQaV69qAjDGH7LApz5kA4',
+            ),
+        )
+        for secret, mainnet_p2sh, testnet_p2sh in tests:
+            point = secret * G
+            self.assertEqual(
+                point.p2sh_p2wpkh_address(testnet=False), mainnet_p2sh)
+            self.assertEqual(
+                point.p2sh_p2wpkh_address(testnet=True), testnet_p2sh)
 
     def test_verify(self):
         point = S256Point(

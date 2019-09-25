@@ -163,8 +163,14 @@ def encode_bech32_checksum(s, testnet=False):
 
 
 def decode_bech32(s):
-    '''Convert a bech32 address to a witness program'''
+    '''Returns whether it's testnet, segwit version and the hash from the bech32 address'''
     hrp, raw_data = s.split('1')
+    if hrp == 'tb':
+        testnet = True
+    elif hrp == 'bc':
+        testnet = False
+    else:
+        raise ValueError('unknown human readable part: {}'.format(hrp))
     data = [BECH32_ALPHABET.index(c) for c in raw_data]
     if not bech32_verify_checksum(hrp, data):
         raise ValueError('bad address: {}'.format(s))
@@ -175,15 +181,14 @@ def decode_bech32(s):
     num_bytes = (len(data) - 7) * 5 // 8
     bits_to_ignore = (len(data) - 7) * 5 % 8
     number >>= bits_to_ignore
-    witness = number.to_bytes(num_bytes, 'big')
+    hash = number.to_bytes(num_bytes, 'big')
     if version == 0:
         version_byte = b'\x00'
     else:
         version_byte = encode_varint(version + 0x50)
     if num_bytes < 2 or num_bytes > 40:
         raise ValueError('bytes out of range: {}'.format(num_bytes))
-    length_byte = encode_varint(num_bytes)
-    return version_byte + length_byte + bytes(witness)
+    return [testnet, version_byte, hash]
 
 
 def read_varint(s):
