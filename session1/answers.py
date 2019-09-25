@@ -223,6 +223,84 @@ ecc:S256Test:test_p2sh_p2wpkh_address:
 True
 
 #endcode
+#unittest
+tx:TxTest:test_sign_p2sh_p2wpkh:
+#endunittest
+#code
+>>> # Example for creating a p2sh-p2wpkh transaction
+>>> from ecc import PrivateKey
+>>> from helper import decode_bech32, hash256, little_endian_to_int
+>>> from script import p2wpkh_script
+>>> from tx import Tx, TxIn, TxOut
+>>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
+>>> prev_tx_hex = '6c14a8370da20c7de5ebf216ece3156e99e7d6070442d93b80cdc344b2e80867'
+>>> prev_tx = bytes.fromhex(prev_tx_hex)
+>>> prev_index = 1
+>>> fee = 500
+>>> tx_in = TxIn(prev_tx, prev_index)
+>>> amount = tx_in.value(testnet=True) - fee
+>>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
+>>> _, _, h160 = decode_bech32(target_address)
+>>> script_pubkey = p2wpkh_script(h160)
+>>> tx_out = TxOut(amount, script_pubkey)
+>>> tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
+>>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
+>>> tx_obj.sign_input(0, private_key, redeem_script=redeem_script)
+True
+>>> print(tx_obj.serialize().hex())
+010000000001016708e8b244c3cd803bd9420407d6e7996e15e3ec16f2ebe57d0ca20d37a8146c0100000017160014401af0b57c7a4b7490c508a47d0747d03cf6ac2effffffff0198801e00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7502483045022100e92c1dc1066c1614da514d0e4e97feb8aec96d88598d9b2f9e7840948dfd353f02201fe146c5ec7af8a9a22faed1726f527a6d1c4cf2243476f10637241e2f98f7af012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d00000000
+
+#endcode
+#exercise
+
+#### Create a p2sh-p2wpkh spending transaction
+
+You have been sent 0.05 testnet BTC. Send 0.03 to `tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au`
+and the change back to your p2sh-p2wpkh address.
+---
+>>> from ecc import PrivateKey
+>>> from helper import decode_bech32, decode_base58, hash256, little_endian_to_int
+>>> from network import SimpleNode
+>>> from script import p2wpkh_script, p2sh_script
+>>> from tx import Tx, TxIn, TxOut
+>>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
+>>> private_key = PrivateKey(little_endian_to_int(hash256(passphrase)))
+>>> prev_tx_hex = '9b3e6e253c79672a4e60a8a563ee735c8f87351058a7a0f5d53a2b5771cf6a6d'  #/prev_tx_hex = '<fill this in>'
+>>> prev_tx = bytes.fromhex(prev_tx_hex)
+>>> prev_index = 0  #/prev_index = -1  # fill this in
+>>> fee = 500
+>>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
+>>> target_amount = 3000000
+>>> # create the transaction input
+>>> tx_in = TxIn(prev_tx, prev_index)  #/
+>>> # create an array of tx_outs
+>>> tx_outs = []  #/
+>>> # decode the target address to get the hash160 of the address
+>>> _, _, target_h160 = decode_bech32(target_address)  #/
+>>> # create the target script pubkey using p2wpkh_script
+>>> target_script_pubkey = p2wpkh_script(target_h160)  #/
+>>> # add the target transaction output
+>>> tx_outs.append(TxOut(target_amount, target_script_pubkey))
+>>> # calculate the change amount, remember you were sent 5000000 sats
+>>> change_amount = 5000000 - target_amount - fee  #/
+>>> # get the p2sh-p2wpkh address for using your private key
+>>> p2sh_address = private_key.point.p2sh_p2wpkh_address()  #/
+>>> # get the hash160 by decoding the p2sh-p2wpkh address
+>>> change_h160 = decode_base58(p2sh_address)
+>>> # create the change script pubkey using p2sh_script
+>>> change_script_pubkey = p2sh_script(change_h160)  #/
+>>> tx_outs.append(TxOut(change_amount, change_script_pubkey))  #/
+>>> # create the transaction with testnet=True and segwit=True
+>>> tx_obj = Tx(1, [tx_in], tx_outs, 0, testnet=True, segwit=True)  #/
+>>> # grab the RedeemScript from the public point
+>>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()  #/
+>>> # sign the one input with your private key
+>>> tx_obj.sign_input(0, private_key, redeem_script=redeem_script)  #/
+True
+>>> # print the hex to see what it looks like
+>>> print(tx_obj.serialize().hex())  #/
+010000000001016d6acf71572b3ad5f5a0a7581035878f5c73ee63a5a8604e2a67793c256e3e9b0000000017160014401af0b57c7a4b7490c508a47d0747d03cf6ac2effffffff02c0c62d00000000001600146e13971913b9aa89659a9f53d327baa8826f2d758c821e000000000017a91479e7cf6859a7047b099a078a8ffbbb58b73b8633870247304402205e35a2329e08e949d16189b213586feee2df37a48f961808372bbee44fcbc59402207a66acbd49f1366ff8e5a718d9f4d33867fe4c595b4834822fb6b33e7e99ab98012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d00000000
+
 '''
 
 

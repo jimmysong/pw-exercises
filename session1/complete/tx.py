@@ -344,7 +344,7 @@ class Tx:
         # turn the hash160 into the serialized p2pkh script and add it
         s += p2pkh_script(h160).serialize()
         # add the value of the input in 8 bytes, little endian
-        s += int_to_little_endian(tx_in.value(), 8)
+        s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
         # add the sequence of the input in 4 bytes, little endian
         s += int_to_little_endian(tx_in.sequence, 4)
         # add the HashOutputs
@@ -446,10 +446,8 @@ class Tx:
         tx_in = self.tx_ins[input_index]
         # the RedeemScript can be computed from the public key
         redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
-        # create a new script with the serialized RedeemScript as the only command
-        script_sig = Script([redeem_script.serialize()])
-        # set the ScriptSig of the input to be this new script
-        tx_in.script_sig = script_sig
+        # set the tx_in ScriptSig with the raw-serialization RedeemScript as the only command
+        tx_in.script_sig = Script([redeem_script.raw_serialize()])
         # get the sig hash (z) using the bip143 serialization, pass in the RedeemScript
         z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
         # get der signature of z from private key
@@ -459,7 +457,7 @@ class Tx:
         # calculate the sec
         sec = private_key.point.sec()
         # change input's witness to be an array of signature and sec pub key
-        self.tx_ins[input_index].witness = [sig, sec]
+        tx_in.witness = [sig, sec]
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
 
@@ -529,6 +527,7 @@ class TxIn:
         else:
             self.script_sig = script_sig
         self.sequence = sequence
+        self.witness = []
 
     def __repr__(self):
         return '{}:{}'.format(
@@ -777,8 +776,8 @@ class TxTest(TestCase):
     def test_sign_p2sh_p2wpkh(self):
         private_key = PrivateKey(secret=8675309)
         redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
-        prev_tx = bytes.fromhex('1228df2c3bfe9b99f3798cce7b21c0d404886e9ffe1a4085b1cb32e91817fb33')
-        prev_index = 0
+        prev_tx = bytes.fromhex('2e19b463bd5c8a3e0f10ae827f5a670f6794fca96394ecf8488321291d1c2ee9')
+        prev_index = 1
         fee = 500
         tx_in = TxIn(prev_tx, prev_index)
         amount = tx_in.value(testnet=True) - fee
@@ -786,7 +785,7 @@ class TxTest(TestCase):
         tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
-        want = '0100000000010133fb1718e932cbb185401afe9f6e8804d4c0217bce8c79f3999bfe3b2cdf2812000000001817160014d52ad7ca9b3d096a38e752c2018e6fbc40cdf26fffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac024830450221008ea76a87b8de3724a557bd7f8250e1deff59230efd48a438263139f3231105520220214571c8f05f69537c0f10c1ceb423481b4db234bf8b05489d13e61e87fec74b012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
+        want = '01000000000101e92e1c1d29218348f8ec9463a9fc94670f675a7f82ae100f3e8a5cbd63b4192e0100000017160014d52ad7ca9b3d096a38e752c2018e6fbc40cdf26fffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac0247304402205e3ae5ac9a0e0a16ae04b0678c5732973ce31051ba9f42193e69843e600d84f2022060a91cbd48899b1bf5d1ffb7532f69ab74bc1701a253a415196b38feb599163b012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
         self.assertEqual(t.serialize().hex(), want)
 
     def test_sign_input(self):
