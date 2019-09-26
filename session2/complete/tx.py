@@ -501,10 +501,26 @@ class Tx:
         return sig
 
     def finalize_p2wsh_multisig_input(self, input_index, signatures, witness_script):
+        '''Puts together the signatures for a p2wsh input so the input verifies.'''
         # the format for multisig is [0, each signature, then the WitnessScript (raw-serialization)]
         items = [0, *signatures, witness_script.raw_serialize()]
         # set the witness of the input to be these items
         self.tx_ins[input_index].witness = items
+        # return whether the input verifies
+        return self.verify_input(input_index)
+
+    def finalize_p2sh_p2wsh_multisig_input(self, input_index, signatures, witness_script):
+        '''Puts together the signatures for a p2sh-p2wsh input so the input verifies.'''
+        # grab the input
+        tx_in = self.tx_ins[input_index]
+        # the format for multisig is [0, each signature, then the WitnessScript (raw-serialization)]
+        items = [0, *signatures, witness_script.raw_serialize()]
+        # set the witness of the input to be these items
+        tx_in.witness = items
+        # the RedeemScript is the p2wsh ScriptPubKey of the WitnessScript
+        redeem_script = witness_script.p2wsh_script_pubkey()
+        # set the ScriptSig of the tx_in to be a new script, which is just the RedeemScript raw-serialized
+        tx_in.script_sig = Script([redeem_script.raw_serialize()])
         # return whether the input verifies
         return self.verify_input(input_index)
         
@@ -802,8 +818,7 @@ class TxTest(TestCase):
         h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
         tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
-        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
-        self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
+        self.assertTrue(t.sign_input(0, private_key))
         want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
         self.assertEqual(t.serialize().hex(), want)
 
@@ -839,7 +854,6 @@ class TxTest(TestCase):
         private_key1 = PrivateKey(secret=8675309)
         private_key2 = PrivateKey(secret=8675310)
         witness_script = Script([0x52, private_key1.point.sec(), private_key2.point.sec(), 0x52, 0xae])
-        print(witness_script.p2wsh_address(testnet=True))
         prev_tx = bytes.fromhex('61cd20e3ffdf9216cee9cd607e1a65d3096513c4df3a63d410c047379b54a94a')
         prev_index = 1
         fee = 500
@@ -852,6 +866,24 @@ class TxTest(TestCase):
         sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)        
         self.assertTrue(t.finalize_p2wsh_multisig_input(0, [sig1, sig2], witness_script))
         want = '010000000001014aa9549b3747c010d4633adfc4136509d3651a7e60cde9ce1692dfffe320cd610100000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac04004730440220325e9f389c4835dab74d644e8c8e295535d9b082d28aefc3fa127e23538051bd022050d68dcecda660d4c01a8443c2b30bd0b3e4b1a405b0f352dcb068210862f6810147304402201abceabfc94903644cf7be836876eaa418cb226e03554c17a71c65b232f4507302202105a8344abae9632d1bc8249a52cf651c4ea02ca5259e20b50d8169c949f5a20147522103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b672103674944c63d8dc3373a88cd1f8403b39b48be07bdb83d51dbbaa34be070c72e1452ae00000000'
+        self.assertEqual(t.serialize().hex(), want)
+
+    def test_sign_p2sh_p2wsh_multisig(self):
+        private_key1 = PrivateKey(secret=8675309)
+        private_key2 = PrivateKey(secret=8675310)
+        witness_script = Script([0x52, private_key1.point.sec(), private_key2.point.sec(), 0x52, 0xae])
+        prev_tx = bytes.fromhex('f92c8c8e40296c6a94539b6d22d8994a56dd8ff2d6018d07a8371fef1f66efee')
+        prev_index = 0
+        fee = 500
+        tx_in = TxIn(prev_tx, prev_index)
+        amount = tx_in.value(testnet=True) - fee
+        h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
+        tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
+        t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
+        sig1 = t.get_sig_p2wsh_multisig(0, private_key1, witness_script)
+        sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)        
+        self.assertTrue(t.finalize_p2sh_p2wsh_multisig_input(0, [sig1, sig2], witness_script))
+        want = '01000000000101eeef661fef1f37a8078d01d6f28fdd564a99d8226d9b53946a6c29408e8c2cf900000000232200206ddafd1089f07a2ba9868df71f622801fe11f5452c6ff1f8f51573133828b437ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac0400483045022100d31433973b7f8014a4e17d46c4720c6c9bed1ee720dc1f0839dd847fa6972553022039278e98a3c18f4748a2727b99acd41eb1534dcf041a3abefd0c7546c868f55801473044022027be7d616b0930c1edf7ed39cc99edf5975e7b859d3224fe340d55c595c2798f02206c05662d39e5b05cc13f936360d62a482b122ad9791074bbdafec3ddc221b8c00147522103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b672103674944c63d8dc3373a88cd1f8403b39b48be07bdb83d51dbbaa34be070c72e1452ae00000000'
         self.assertEqual(t.serialize().hex(), want)
         
 

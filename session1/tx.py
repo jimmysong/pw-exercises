@@ -768,8 +768,7 @@ class TxTest(TestCase):
         h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
         tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
-        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
-        self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
+        self.assertTrue(t.sign_input(0, private_key))
         want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
         self.assertEqual(t.serialize().hex(), want)
 

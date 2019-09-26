@@ -1,6 +1,6 @@
 '''
 #code
->>> import ecc, tx
+>>> import ecc, script, tx
 
 #endcode
 #unittest
@@ -89,14 +89,13 @@ script:ScriptTest:test_p2wsh_address:
 tx:TxTest:test_sign_p2wsh_multisig:
 #endunittest
 #code
->>> # Example for creating a p2wsh multisig transaction
+>>> # Example for signing a p2wsh multisig transaction
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, hash256, little_endian_to_int
 >>> from script import p2wpkh_script
 >>> from tx import Tx, TxIn, TxOut
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> sec1 = private_key.point.sec()
->>> print(sec1.hex())
 >>> sec2 = bytes.fromhex('031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e')
 >>> witness_script = Script([0x52, sec1, sec2, 0x52, 0xae])
 >>> sig2 = bytes.fromhex('304402206f68a4c8731b1981fde3ae2f8ac3e21dbb42903853a3cecf18c30c31d36b510102207e5eba87f5d9134307d0f0cfb3eb065b18bf8a35df9a8b10538586328d1c7aa101')
@@ -120,7 +119,7 @@ True
 #endcode
 #exercise
 
-#### Create a p2wpkh spending transaction
+#### Create a p2wsh spending transaction
 
 You have been provided with an unsigned transaction, witness script and 1 of the 2 required signatures. Sign and broadcast the transaction!
 
@@ -131,9 +130,9 @@ You have been provided with an unsigned transaction, witness script and 1 of the
 >>> from network import SimpleNode
 >>> from script import Script
 >>> from tx import Tx, TxIn, TxOut
->>> hex_tx = '01000000000101dc60d3cc9fbfbfeae68031ee987d674315e3ec6fa5a910d913d1d70cc24bf6a70000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750000000000'
->>> hex_sig2 = '304402206f68a4c8731b1981fde3ae2f8ac3e21dbb42903853a3cecf18c30c31d36b510102207e5eba87f5d9134307d0f0cfb3eb065b18bf8a35df9a8b10538586328d1c7aa101'
->>> hex_witness_script = '47522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e52ae'
+>>> hex_tx = '01000000000101dc60d3cc9fbfbfeae68031ee987d674315e3ec6fa5a910d913d1d70cc24bf6a70000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750000000000'  #/hex_tx = '<fill this in>'
+>>> hex_sig2 = '304402206f68a4c8731b1981fde3ae2f8ac3e21dbb42903853a3cecf18c30c31d36b510102207e5eba87f5d9134307d0f0cfb3eb065b18bf8a35df9a8b10538586328d1c7aa101'  #/hex_sig2 = '<fill this in>'
+>>> hex_witness_script = '47522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e52ae'  #/hex_witness_script = '<fill this in>'
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> private_key = PrivateKey(little_endian_to_int(hash256(passphrase)))
 >>> # turn the hex raw transaction into a stream
@@ -156,156 +155,138 @@ True
 01000000000101dc60d3cc9fbfbfeae68031ee987d674315e3ec6fa5a910d913d1d70cc24bf6a70000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750400473044022041a5f6066f066bb35d2e426bec0fa673fe9737461153eea66e23ab39ffc4f73602203e351dee8e0e3dd3fb5a86adca7c5a0eaee48e4d655c3a9d4655d235e6ad5a630147304402206f68a4c8731b1981fde3ae2f8ac3e21dbb42903853a3cecf18c30c31d36b510102207e5eba87f5d9134307d0f0cfb3eb065b18bf8a35df9a8b10538586328d1c7aa10147522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e52ae00000000
 
 #endexercise
-#unittest
-tx:TxTest:test_verify_p2sh_p2wsh:
-#endunittest
 #code
 >>> # Example of generating a p2sh-p2wsh address
 >>> from ecc import S256Point
->>> from helper import encode_base58_checksum, hash160, h160_to_p2sh_address
->>> sec_hex = '02c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d'
->>> point = S256Point.parse(bytes.fromhex(sec_hex))
->>> h160 = point.hash160()
->>> redeem_script = bytes([0]) + encode_varstr(h160)
->>> h160_p2sh = hash160(redeem_script)
->>> address = h160_to_p2sh_address(h160_p2sh, testnet=False)
->>> print(address)
-3CobPD6RBnTZsFdka71XHQr4vHXDZMu2zm
+>>> from helper import encode_base58_checksum, hash160, sha256, h160_to_p2sh_address
+>>> from script import Script, p2wsh_script
+>>> sec1_hex = '026ccfb8061f235cc110697c0bfb3afb99d82c886672f6b9b5393b25a434c0cbf3'
+>>> sec2_hex = '03befa190c0c22e2f53720b1be9476dcf11917da4665c44c9c71c3a2d28a933c35'
+>>> sec3_hex = '02be46dc245f58085743b1cc37c82f0d63a960efa43b5336534275fc469b49f4ac'
+>>> sec1 = bytes.fromhex(sec1_hex)
+>>> sec2 = bytes.fromhex(sec2_hex)
+>>> sec3 = bytes.fromhex(sec3_hex)
+>>> witness_script = Script([0x52, sec1, sec2, sec3, 0x53, 0xae])  # 2-of-3 multisig
+>>> s256 = sha256(witness_script.raw_serialize())
+>>> redeem_script = p2wsh_script(s256)
+>>> print(redeem_script.p2sh_address(testnet=True))
+2MvVx9ccWqyYVNa5Xz9pfCEVk99zVBZh9ms
 
 #endcode
 #exercise
-#### Create a testnet p2sh-p2wpkh address with your private key.
+#### Create a testnet 2-of-3 multisig p2sh-p2wsh address with your private key and the two sec pubkeys provided.
 
 ---
 >>> from ecc import PrivateKey
->>> from helper import encode_varstr, h160_to_p2sh_address, hash160, hash256, little_endian_to_int
+>>> from helper import encode_varstr, h160_to_p2sh_address, hash160, hash256, sha256, little_endian_to_int
+>>> from script import p2wsh_script, Script
+>>> sec2 = bytes.fromhex('031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e')
+>>> sec3 = bytes.fromhex('02618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d2')
 >>> # use the same passphrase from session 0
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> secret = little_endian_to_int(hash256(passphrase))
 >>> # create a private key using the secret
 >>> private_key = PrivateKey(secret)  #/
->>> # get the public key using the .point property
->>> public_key = private_key.point  #/
->>> # get the hash160 of the point
->>> h160 = public_key.hash160()  #/
->>> # the RedeemScript starts with the segwit version (0 or b'\x00)
->>> redeem_script = bytes([0])  #/
->>> # next, add the hash160 to the RedeemScript using encode_varstr
->>> redeem_script += encode_varstr(h160)  #/
->>> # perform a hash160 to get the hash160 of the redeem script
->>> h160_p2sh = hash160(redeem_script)  #/
->>> # encode to base58 using h160_to_p2sh_address, remember testnet=True
->>> address = h160_to_p2sh_address(h160_p2sh, testnet=True)  #/
->>> # print the address
->>> print(address)  #/
-2N4MoSx2SoExv53GJFEdPuMqL8djPQPH2er
+>>> # get the sec using the .point property
+>>> sec1 = private_key.point.sec()  #/
+>>> # create a WitnessScript that's 2 of 3 multisig
+>>> witness_script = Script([0x52, sec1, sec2, sec3, 0x53, 0xae])  #/
+>>> # get the sha256 of the raw serialization of the witness script
+>>> s256 = sha256(witness_script.raw_serialize())  #/
+>>> # make the RedeemScript using the p2wsh_script function on the sha256
+>>> redeem_script = p2wsh_script(s256)  #/
+>>> # print the RedeemScript's p2sh address
+>>> print(redeem_script.p2sh_address(testnet=True))  #/
+2N6x1Y58uwZ7oYAZSeYveaYHGKHvotUUfyZ
 
 #endexercise
 #unittest
-ecc:S256Test:test_p2sh_p2wpkh_address:
+script:ScriptTest:test_p2sh_p2wsh_address:
 #endunittest
 #code
->>> # Example for signing a p2sh-p2wpkh input
+>>> # Example for signing a p2sh-p2wsh input
 >>> from io import BytesIO
 >>> from ecc import PrivateKey
 >>> from helper import hash256, little_endian_to_int, SIGHASH_ALL
 >>> from script import Script
 >>> from tx import Tx
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
->>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
->>> raw_tx_hex = '010000000001014e6b786f3cd70ab1ffd75caa6bb252c9888fdca9ca94d40fec24bec3e643d89e0000000000ffffffff014c400f0000000000160014401af0b57c7a4b7490c508a47d0747d03cf6ac2e0000000000'
->>> input_index = 0
->>> stream = BytesIO(bytes.fromhex(raw_tx_hex))
+>>> hex_tx = '01000000000101ec13653fae5706168e92d9a3e4d98044d4af001a3081a70e57865caf94e0b7ee0000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750000000000'
+>>> hex_witness_script = '69522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e2102618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d253ae'
+>>> stream = BytesIO(bytes.fromhex(hex_tx))
 >>> tx_obj = Tx.parse(stream, testnet=True)
->>> z = tx_obj.sig_hash_bip143(input_index, redeem_script=redeem_script)
+>>> stream = BytesIO(bytes.fromhex(hex_witness_script))
+>>> witness_script = Script.parse(stream)
+>>> z = tx_obj.sig_hash_bip143(input_index, witness_script=witness_script)
 >>> der = private_key.sign(z).der()
 >>> sig = der + SIGHASH_ALL.to_bytes(1, 'big')
->>> sec = private_key.point.sec()
->>> tx_in = tx_obj.tx_ins[input_index]
->>> tx_in.witness = [sig, sec]
->>> tx_in.script_sig = Script([redeem_script.raw_serialize()])
->>> print(tx_obj.verify_input(input_index))
-True
+>>> print(sig.hex())
+30440220603857be62aec5b6e16a13659fd7ca36f822b92999a7303f7ab3be6481227acf022020a56a52cb2088def4c12d2e2fa7055f4582b0a5aba7db4c169777456378db0501
 
 #endcode
 #unittest
-tx:TxTest:test_sign_p2sh_p2wpkh:
+tx:TxTest:test_sign_p2sh_p2wsh_multisig:
 #endunittest
 #code
->>> # Example for creating a p2sh-p2wpkh transaction
+>>> # Example for signing a p2sh-p2wsh multisig transaction
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, hash256, little_endian_to_int
->>> from script import p2wpkh_script
+>>> from script import Script
 >>> from tx import Tx, TxIn, TxOut
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
->>> prev_tx_hex = '6c14a8370da20c7de5ebf216ece3156e99e7d6070442d93b80cdc344b2e80867'
->>> prev_tx = bytes.fromhex(prev_tx_hex)
->>> prev_index = 1
->>> fee = 500
->>> tx_in = TxIn(prev_tx, prev_index)
->>> amount = tx_in.value(testnet=True) - fee
->>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
->>> _, _, h160 = decode_bech32(target_address)
->>> script_pubkey = p2wpkh_script(h160)
->>> tx_out = TxOut(amount, script_pubkey)
->>> tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
->>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
->>> tx_obj.sign_input(0, private_key, redeem_script=redeem_script)
+>>> hex_tx = '01000000000101ec13653fae5706168e92d9a3e4d98044d4af001a3081a70e57865caf94e0b7ee0000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750000000000'
+>>> hex_witness_script = '69522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e2102618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d253ae'
+>>> hex_sig2 = '3045022100e9fa8587958b540ac71f128629e3019f07b14b0e5eb248afb3d4f92ddfee9f6002201bda6dc9297471419a00d86899f753d6c015e42d51df9aa1d8b5dc53f595d9e401'
+>>> stream = BytesIO(bytes.fromhex(hex_tx))
+>>> tx_obj = Tx.parse(stream, testnet=True)
+>>> stream = BytesIO(bytes.fromhex(hex_witness_script))
+>>> witness_script = Script.parse(stream)
+>>> sig2 = bytes.fromhex(hex_sig2)
+>>> sig1 = tx_obj.get_sig_p2wsh_multisig(0, private_key, witness_script)
+>>> tx_obj.finalize_p2sh_p2wsh_multisig_input(0, [sig1, sig2], witness_script)
 True
 >>> print(tx_obj.serialize().hex())
-010000000001016708e8b244c3cd803bd9420407d6e7996e15e3ec16f2ebe57d0ca20d37a8146c0100000017160014401af0b57c7a4b7490c508a47d0747d03cf6ac2effffffff0198801e00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7502483045022100e92c1dc1066c1614da514d0e4e97feb8aec96d88598d9b2f9e7840948dfd353f02201fe146c5ec7af8a9a22faed1726f527a6d1c4cf2243476f10637241e2f98f7af012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d00000000
+01000000000101ec13653fae5706168e92d9a3e4d98044d4af001a3081a70e57865caf94e0b7ee0000000023220020df9f2354c7040acd8ab725dc356bfafcae5b291e4d3f30685aede1d2a5d35dacffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7504004730440220603857be62aec5b6e16a13659fd7ca36f822b92999a7303f7ab3be6481227acf022020a56a52cb2088def4c12d2e2fa7055f4582b0a5aba7db4c169777456378db0501483045022100e9fa8587958b540ac71f128629e3019f07b14b0e5eb248afb3d4f92ddfee9f6002201bda6dc9297471419a00d86899f753d6c015e42d51df9aa1d8b5dc53f595d9e40169522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e2102618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d253ae00000000
 
 #endcode
 #exercise
 
-#### Create a p2sh-p2wpkh spending transaction
+#### Create a p2sh-p2wsh spending transaction
 
-You have been sent 0.05 testnet BTC. Send 0.03 to `tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au`
-and the change back to your p2sh-p2wpkh address.
+You have been provided with an unsigned transaction, witness script and 1 of the 2 required signatures. Sign and broadcast the transaction!
+
 ---
+>>> from io import BytesIO
 >>> from ecc import PrivateKey
->>> from helper import decode_bech32, decode_base58, hash256, little_endian_to_int
+>>> from helper import decode_bech32, hash256, little_endian_to_int
 >>> from network import SimpleNode
->>> from script import p2wpkh_script, p2sh_script
+>>> from script import Script
 >>> from tx import Tx, TxIn, TxOut
+>>> hex_tx = '01000000000101ec13653fae5706168e92d9a3e4d98044d4af001a3081a70e57865caf94e0b7ee0000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750000000000'  #/hex_tx = '<fill this in>'
+>>> hex_witness_script = '69522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e2102618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d253ae'  #/hex_witness_script = '<fill this in>'
+>>> hex_sig2 = '3045022100e9fa8587958b540ac71f128629e3019f07b14b0e5eb248afb3d4f92ddfee9f6002201bda6dc9297471419a00d86899f753d6c015e42d51df9aa1d8b5dc53f595d9e401'  #/hex_sig2 = '<fill this in>'
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> private_key = PrivateKey(little_endian_to_int(hash256(passphrase)))
->>> prev_tx_hex = '9b3e6e253c79672a4e60a8a563ee735c8f87351058a7a0f5d53a2b5771cf6a6d'  #/prev_tx_hex = '<fill this in>'
->>> prev_tx = bytes.fromhex(prev_tx_hex)
->>> prev_index = 0  #/prev_index = -1  # fill this in
->>> fee = 500
->>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
->>> target_amount = 3000000
->>> # create the transaction input
->>> tx_in = TxIn(prev_tx, prev_index)  #/
->>> # create an array of tx_outs
->>> tx_outs = []  #/
->>> # decode the target address to get the hash160 of the address
->>> _, _, target_h160 = decode_bech32(target_address)  #/
->>> # create the target script pubkey using p2wpkh_script
->>> target_script_pubkey = p2wpkh_script(target_h160)  #/
->>> # add the target transaction output
->>> tx_outs.append(TxOut(target_amount, target_script_pubkey))
->>> # calculate the change amount, remember you were sent 5000000 sats
->>> change_amount = 5000000 - target_amount - fee  #/
->>> # get the p2sh-p2wpkh address for using your private key
->>> p2sh_address = private_key.point.p2sh_p2wpkh_address()  #/
->>> # get the hash160 by decoding the p2sh-p2wpkh address
->>> change_h160 = decode_base58(p2sh_address)
->>> # create the change script pubkey using p2sh_script
->>> change_script_pubkey = p2sh_script(change_h160)  #/
->>> tx_outs.append(TxOut(change_amount, change_script_pubkey))  #/
->>> # create the transaction with testnet=True and segwit=True
->>> tx_obj = Tx(1, [tx_in], tx_outs, 0, testnet=True, segwit=True)  #/
->>> # grab the RedeemScript from the public point
->>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()  #/
->>> # sign the one input with your private key
->>> tx_obj.sign_input(0, private_key, redeem_script=redeem_script)  #/
+>>> # turn the hex raw transaction into a stream
+>>> stream = BytesIO(bytes.fromhex(hex_tx))  #/
+>>> # parse the transaction, testnet=True
+>>> tx_obj = Tx.parse(stream, testnet=True)  #/
+>>> # turn the hex witness script into a stream
+>>> stream = BytesIO(bytes.fromhex(hex_witness_script))  #/
+>>> # parse the witness script using Script.parse
+>>> witness_script = Script.parse(stream)  #/
+>>> # convert the signature to bytes
+>>> sig2 = bytes.fromhex(hex_sig2)  #/
+>>> # get the other signature using get_sig_p2wsh_multisig for input 0
+>>> sig1 = tx_obj.get_sig_p2wsh_multisig(0, private_key, witness_script=witness_script)  #/
+>>> # finalize the transaction with the two signatures
+>>> tx_obj.finalize_p2sh_p2wsh_multisig_input(0, [sig1, sig2], witness_script=witness_script)  #/
 True
 >>> # print the hex to see what it looks like
 >>> print(tx_obj.serialize().hex())  #/
-010000000001016d6acf71572b3ad5f5a0a7581035878f5c73ee63a5a8604e2a67793c256e3e9b0000000017160014401af0b57c7a4b7490c508a47d0747d03cf6ac2effffffff02c0c62d00000000001600146e13971913b9aa89659a9f53d327baa8826f2d758c821e000000000017a91479e7cf6859a7047b099a078a8ffbbb58b73b8633870247304402205e35a2329e08e949d16189b213586feee2df37a48f961808372bbee44fcbc59402207a66acbd49f1366ff8e5a718d9f4d33867fe4c595b4834822fb6b33e7e99ab98012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d00000000
+01000000000101ec13653fae5706168e92d9a3e4d98044d4af001a3081a70e57865caf94e0b7ee0000000023220020df9f2354c7040acd8ab725dc356bfafcae5b291e4d3f30685aede1d2a5d35dacffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7504004730440220603857be62aec5b6e16a13659fd7ca36f822b92999a7303f7ab3be6481227acf022020a56a52cb2088def4c12d2e2fa7055f4582b0a5aba7db4c169777456378db0501483045022100e9fa8587958b540ac71f128629e3019f07b14b0e5eb248afb3d4f92ddfee9f6002201bda6dc9297471419a00d86899f753d6c015e42d51df9aa1d8b5dc53f595d9e40169522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e2102618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d253ae00000000
 
+#endexercise
 '''
 
 

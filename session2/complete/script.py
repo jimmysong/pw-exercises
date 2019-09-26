@@ -292,16 +292,28 @@ class Script:
         # convert this to a p2sh address
         return h160_to_p2sh_address(h160, testnet)
 
-    def p2wsh_address(self, testnet=False):
-        '''Assumes if the script is a WitnessScript, generates a p2wsh address'''
+    def p2wsh_script_pubkey(self):
+        '''Assumes the script is a WitnessScript, generates the ScriptPubKey'''
         # get the sha256 of the current script's raw serialization
         s256 = sha256(self.raw_serialize())
-        # create a new p2wsh script using p2wsh_script
-        p2wsh_script = p2wsh_script(s256)
-        # calculate the raw serialization of the p2wsh script
-        raw = p2wsh_script.raw_serialize()
+        # return new p2wsh script using p2wsh_script
+        return p2wsh_script(s256)
+    
+    def p2wsh_address(self, testnet=False):
+        '''Assumes the script is a WitnessScript, generates a p2wsh address'''
+        # get the ScriptPubKey of the WitnessScript
+        script_pubkey = self.p2wsh_script_pubkey()
+        # calculate the raw serialization of the ScriptPubKey
+        raw = script_pubkey.raw_serialize()
         # return the encoded bech32 address
         return encode_bech32_checksum(raw, testnet=testnet)
+
+    def p2sh_p2wsh_address(self, testnet=False):
+        '''Assumes the script is a WitnessScript, generates a p2sh-p2wsh address'''
+        # the RedeemScript is the p2wsh ScriptPubKey
+        redeem_script = self.p2wsh_script_pubkey()
+        # return the p2sh address of the RedeemScript (remember testnet)
+        return redeem_script.p2sh_address(testnet)
 
 
 class ScriptTest(TestCase):
@@ -344,3 +356,9 @@ class ScriptTest(TestCase):
         witness_script = Script.parse(BytesIO(encode_varstr(bytes.fromhex(witness_script_hex))))
         want = 'bc1qwqdg6squsna38e46795at95yu9atm8azzmyvckulcc7kytlcckxswvvzej'
         self.assertEqual(witness_script.p2wsh_address(), want)
+
+    def test_p2sh_p2wsh_address(self):
+        witness_script_hex = '5221026ccfb8061f235cc110697c0bfb3afb99d82c886672f6b9b5393b25a434c0cbf32103befa190c0c22e2f53720b1be9476dcf11917da4665c44c9c71c3a2d28a933c352102be46dc245f58085743b1cc37c82f0d63a960efa43b5336534275fc469b49f4ac53ae'
+        witness_script = Script.parse(BytesIO(encode_varstr(bytes.fromhex(witness_script_hex))))
+        want = '2MvVx9ccWqyYVNa5Xz9pfCEVk99zVBZh9ms'
+        self.assertEqual(witness_script.p2sh_p2wsh_address(testnet=True), want)

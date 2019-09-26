@@ -1,6 +1,6 @@
 '''
 #code
->>> import ecc, tx
+>>> import ecc, script, tx
 
 #endcode
 #unittest
