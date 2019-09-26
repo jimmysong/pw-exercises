@@ -468,21 +468,17 @@ class S256Point(Point):
         return encode_bech32_checksum(raw, testnet)
 
     def p2sh_p2wpkh_redeem_script(self):
-        '''Returns the RedeemScript for the p2sh-p2wpkh address'''
-        from script import Script  # avoid circular dependency
-        # the RedeemScript is the witness program (0, hash160)
-        redeem_script = Script([0, self.hash160()])
-        return redeem_script
-    
+        '''Returns the RedeemScript for a p2sh-p2wpkh redemption'''
+        from script import p2wpkh_script  # avoid circular dependency
+        # get the p2sh-p2wpkh RedeemScript using p2wpkh_script on the hash160
+        return p2wpkh_script(self.hash160())
+
     def p2sh_p2wpkh_address(self, testnet=False):
         '''Returns the p2sh-p2wpkh base58 address string'''
-        # raw_serialize the RedeemScript
-        bin_redeem_script = self.p2sh_p2wpkh_redeem_script().raw_serialize()
-        # get the hash160 of the serialized RedeemScript
-        h160 = hash160(bin_redeem_script)
-        # convert the h160 to a p2sh address using h160_to_p2sh_address function
-        # remember to pass in testnet
-        return h160_to_p2sh_address(h160, testnet)
+        # get the p2sh-p2wpkh RedeemScript
+        redeem_script = self.p2sh_p2wpkh_redeem_script()
+        # return the RedeemScript's p2sh_address, remember to pass in testnet
+        return redeem_script.p2sh_address(testnet)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking

@@ -37,9 +37,9 @@ def p2wpkh_script(h160):
     return Script([0x00, h160])
 
 
-def p2wsh_script(h256):
-    '''Takes a hash160 and returns the p2wsh scriptPubKey'''
-    return Script([0x00, h256])
+def p2wsh_script(s256):
+    '''Takes a sha256 and returns the p2wsh scriptPubKey'''
+    return Script([0x00, s256])
 
 
 class Script:
@@ -284,6 +284,13 @@ class Script:
         # raise a ValueError
         raise ValueError('Unknown ScriptPubKey')
 
+    def p2sh_address(self, testnet=False):
+        '''Assumes this is a RedeemScript. Returns the p2sh address.'''
+        # get the hash160 of the current script's raw serialization
+        h160 = hash160(self.raw_serialize())
+        # convert this to a p2sh address
+        return h160_to_p2sh_address(h160, testnet)
+
 
 class ScriptTest(TestCase):
 
@@ -314,3 +321,8 @@ class ScriptTest(TestCase):
         self.assertEqual(p2sh_script_pubkey.address(), address_3)
         address_4 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
         self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_4)
+
+    def test_p2sh_address(self):
+        hex_raw_redeem_script = '475221022626e955ea6ea6d98850c994f9107b036b1334f18ca8830bfff1295d21cfdb702103b287eaf122eea69030a0e9feed096bed8045c8b98bec453e1ffac7fbdbd4bb7152ae'
+        redeem_script = Script.parse(BytesIO(bytes.fromhex(hex_raw_redeem_script)))
+        self.assertEqual(redeem_script.p2sh_address(), '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh')
