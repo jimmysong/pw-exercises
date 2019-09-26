@@ -38,9 +38,9 @@ def p2wpkh_script(h160):
     return Script([0x00, h160])
 
 
-def p2wsh_script(h256):
+def p2wsh_script(s256):
     '''Takes a hash160 and returns the p2wsh scriptPubKey'''
-    return Script([0x00, h256])
+    return Script([0x00, s256])
 
 
 class Script:
@@ -213,12 +213,12 @@ class Script:
                 # witness program version 0 rule. if stack commands are:
                 # 0 <32 byte hash> this is p2wsh
                 if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 32:
-                    h256 = stack.pop()
+                    s256 = stack.pop()
                     stack.pop()
                     commands.extend(witness[:-1])
                     witness_script = witness[-1]
-                    if h256 != sha256(witness_script):
-                        print('bad sha256 {} vs {}'.format(h256.hex(), sha256(witness_script).hex()))
+                    if s256 != sha256(witness_script):
+                        print('bad sha256 {} vs {}'.format(s256.hex(), sha256(witness_script).hex()))
                         return False
                     # hashes match! now add the Witness Script
                     stream = BytesIO(encode_varint(len(witness_script)) + witness_script)
@@ -285,14 +285,21 @@ class Script:
         # raise a ValueError
         raise ValueError('Unknown ScriptPubKey')
 
+    def p2sh_address(self, testnet=False):
+        '''Assumes this is a RedeemScript. Returns the p2sh address.'''
+        # get the hash160 of the current script's raw serialization
+        h160 = hash160(self.raw_serialize())
+        # convert this to a p2sh address
+        return h160_to_p2sh_address(h160, testnet)
+
     def p2wsh_address(self, testnet=False):
         '''Assumes if the script is a WitnessScript, generates a p2wsh address'''
         # get the sha256 of the current script's raw serialization
         s256 = sha256(self.raw_serialize())
-        # create a new script with 0 and the s256
-        s = Script([0, s256])
-        # calculate the raw serialization of the new script
-        raw = s.raw_serialize()
+        # create a new p2wsh script using p2wsh_script
+        p2wsh_script = p2wsh_script(s256)
+        # calculate the raw serialization of the p2wsh script
+        raw = p2wsh_script.raw_serialize()
         # return the encoded bech32 address
         return encode_bech32_checksum(raw, testnet=testnet)
 
@@ -326,6 +333,11 @@ class ScriptTest(TestCase):
         self.assertEqual(p2sh_script_pubkey.address(), address_3)
         address_4 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
         self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_4)
+
+    def test_p2sh_address(self):
+        hex_raw_redeem_script = '475221022626e955ea6ea6d98850c994f9107b036b1334f18ca8830bfff1295d21cfdb702103b287eaf122eea69030a0e9feed096bed8045c8b98bec453e1ffac7fbdbd4bb7152ae'
+        redeem_script = Script.parse(BytesIO(bytes.fromhex(hex_raw_redeem_script)))
+        self.assertEqual(redeem_script.p2sh_address(), '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh')
 
     def test_p2wsh_address(self):
         witness_script_hex = '52210375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c2103a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff2103c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f88053ae'

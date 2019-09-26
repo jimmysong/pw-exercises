@@ -212,12 +212,12 @@ class Script:
                 # witness program version 0 rule. if stack commands are:
                 # 0 <32 byte hash> this is p2wsh
                 if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 32:
-                    h256 = stack.pop()
+                    s256 = stack.pop()
                     stack.pop()
                     commands.extend(witness[:-1])
                     witness_script = witness[-1]
-                    if h256 != sha256(witness_script):
-                        print('bad sha256 {} vs {}'.format(h256.hex(), sha256(witness_script).hex()))
+                    if s256 != sha256(witness_script):
+                        print('bad sha256 {} vs {}'.format(s256.hex(), sha256(witness_script).hex()))
                         return False
                     # hashes match! now add the Witness Script
                     stream = BytesIO(encode_varint(len(witness_script)) + witness_script)
