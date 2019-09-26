@@ -285,6 +285,12 @@ class Script:
         # raise a ValueError
         raise ValueError('Unknown ScriptPubKey')
 
+    def p2sh_script_pubkey(self):
+        # get the hash160 of the current script's raw serialization
+        h160 = hash160(self.raw_serialize())
+        # return the p2sh script of the hash160
+        return p2sh_script(h160)
+
     def p2sh_address(self, testnet=False):
         '''Assumes this is a RedeemScript. Returns the p2sh address.'''
         # get the hash160 of the current script's raw serialization
