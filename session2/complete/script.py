@@ -282,40 +282,44 @@ class Script:
         elif self.is_p2sh_script_pubkey():  # p2sh
             # convert to p2sh address using h160_to_p2sh_address (remember testnet)
             return h160_to_p2sh_address(self.hash160(), testnet)
+        # if p2wpkh or p2wsh
+        elif self.is_p2wpkh_script_pubkey() or self.is_p2wsh_script_pubkey():  # p2wpkh
+            witness_program = self.raw_serialize()
+            # convert to bech32 address using encode_bech32_checksum
+            return encode_bech32_checksum(witness_program, testnet)
         # raise a ValueError
         raise ValueError('Unknown ScriptPubKey')
 
     def p2sh_script_pubkey(self):
+        '''Assumes self is a RedeemScript. Returns the p2sh ScriptPubKey'''
         # get the hash160 of the current script's raw serialization
         h160 = hash160(self.raw_serialize())
         # return the p2sh script of the hash160
         return p2sh_script(h160)
 
     def p2sh_address(self, testnet=False):
-        '''Assumes this is a RedeemScript. Returns the p2sh address.'''
+        '''Assumes self is a RedeemScript. Returns the p2sh address.'''
         # get the hash160 of the current script's raw serialization
         h160 = hash160(self.raw_serialize())
         # convert this to a p2sh address
         return h160_to_p2sh_address(h160, testnet)
 
     def p2wsh_script_pubkey(self):
-        '''Assumes the script is a WitnessScript, generates the ScriptPubKey'''
+        '''Assumes self is a WitnessScript, generates the ScriptPubKey'''
         # get the sha256 of the current script's raw serialization
         s256 = sha256(self.raw_serialize())
         # return new p2wsh script using p2wsh_script
         return p2wsh_script(s256)
     
     def p2wsh_address(self, testnet=False):
-        '''Assumes the script is a WitnessScript, generates a p2wsh address'''
+        '''Assumes self is a WitnessScript, generates a p2wsh address'''
         # get the ScriptPubKey of the WitnessScript
         script_pubkey = self.p2wsh_script_pubkey()
-        # calculate the raw serialization of the ScriptPubKey
-        raw = script_pubkey.raw_serialize()
-        # return the encoded bech32 address
-        return encode_bech32_checksum(raw, testnet=testnet)
+        # return the address of the ScriptPubKey (remember testnet)
+        return script_pubkey.address(testnet)
 
     def p2sh_p2wsh_address(self, testnet=False):
-        '''Assumes the script is a WitnessScript, generates a p2sh-p2wsh address'''
+        '''Assumes self is a WitnessScript, generates a p2sh-p2wsh address'''
         # the RedeemScript is the p2wsh ScriptPubKey
         redeem_script = self.p2wsh_script_pubkey()
         # return the p2sh address of the RedeemScript (remember testnet)
