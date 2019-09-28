@@ -84,7 +84,7 @@ tx:TxTest:test_sign_p2wpkh:
 >>> # Example for creating a p2wpkh transaction
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, hash256, little_endian_to_int
->>> from script import p2wpkh_script
+>>> from script import P2WPKHScriptPubKey
 >>> from tx import Tx, TxIn, TxOut
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> prev_tx_hex = '0f007db8670c8b22ed64d95c61895d9c8e516ec938f99fbe4973fc0172ef93cf'
@@ -95,7 +95,7 @@ tx:TxTest:test_sign_p2wpkh:
 >>> amount = tx_in.value(testnet=True) - fee
 >>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
 >>> _, _, h160 = decode_bech32(target_address)
->>> script_pubkey = p2wpkh_script(h160)
+>>> script_pubkey = P2WPKHScriptPubKey(h160)
 >>> tx_out = TxOut(amount, script_pubkey)
 >>> tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
 >>> tx_obj.sign_input(0, private_key)
@@ -114,7 +114,7 @@ and the change back to your bech32 address.
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, hash256, little_endian_to_int
 >>> from network import SimpleNode
->>> from script import p2wpkh_script
+>>> from script import P2WPKHScriptPubKey
 >>> from tx import Tx, TxIn, TxOut
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> private_key = PrivateKey(little_endian_to_int(hash256(passphrase)))
@@ -130,16 +130,16 @@ and the change back to your bech32 address.
 >>> tx_outs = []  #/
 >>> # decode the target address to get the hash160 of the address
 >>> _, _, target_h160 = decode_bech32(target_address)  #/
->>> # create the target script pubkey using p2wpkh_script
->>> target_script_pubkey = p2wpkh_script(target_h160)  #/
+>>> # create the target script pubkey using P2WPKHScriptPubKey
+>>> target_script_pubkey = P2WPKHScriptPubKey(target_h160)  #/
 >>> # add the target transaction output
 >>> tx_outs.append(TxOut(target_amount, target_script_pubkey))
 >>> # calculate the change amount, remember you were sent 5000000 sats
 >>> change_amount = 5000000 - target_amount - fee  #/
 >>> # calculate the hash160 for your private key
 >>> change_h160 = private_key.point.hash160()  #/
->>> # create the change script pubkey using p2wpkh_script
->>> change_script_pubkey = p2wpkh_script(change_h160)  #/
+>>> # create the change script pubkey using P2WPKHScriptPubKey
+>>> change_script_pubkey = P2WPKHScriptPubKey(change_h160)  #/
 >>> tx_outs.append(TxOut(change_amount, change_script_pubkey))  #/
 >>> # create the transaction with testnet=True and segwit=True
 >>> tx_obj = Tx(1, [tx_in], tx_outs, 0, testnet=True, segwit=True)  #/
@@ -158,11 +158,11 @@ tx:TxTest:test_verify_p2sh_p2wpkh:
 >>> # Example of generating a p2sh-p2wpkh address
 >>> from ecc import S256Point
 >>> from helper import encode_base58_checksum, hash160, h160_to_p2sh_address
->>> from script import p2wpkh_script
+>>> from script import P2WPKHScriptPubKey
 >>> sec_hex = '02c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d'
 >>> point = S256Point.parse(bytes.fromhex(sec_hex))
 >>> h160 = point.hash160()
->>> redeem_script = p2wpkh_script(h160)
+>>> redeem_script = P2WPKHScriptPubKey(h160)
 >>> h160_p2sh = hash160(redeem_script.raw_serialize())
 >>> address = h160_to_p2sh_address(h160_p2sh, testnet=False)
 >>> print(address)
@@ -175,7 +175,7 @@ tx:TxTest:test_verify_p2sh_p2wpkh:
 ---
 >>> from ecc import PrivateKey
 >>> from helper import encode_varstr, h160_to_p2sh_address, hash160, hash256, little_endian_to_int
->>> from script import p2wpkh_script
+>>> from script import P2WPKHScriptPubKey
 >>> # use the same passphrase from session 0
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> secret = little_endian_to_int(hash256(passphrase))
@@ -185,8 +185,8 @@ tx:TxTest:test_verify_p2sh_p2wpkh:
 >>> public_key = private_key.point  #/
 >>> # get the hash160 of the point
 >>> h160 = public_key.hash160()  #/
->>> # create the RedeemScript, which is the p2wpkh_script of the hash160
->>> redeem_script = p2wpkh_script(h160)  #/
+>>> # create the RedeemScript, which is the P2WPKHScriptPubKey of the hash160
+>>> redeem_script = P2WPKHScriptPubKey(h160)  #/
 >>> # perform a hash160 on the raw serialization of the RedeemScript
 >>> p2sh_h160 = hash160(redeem_script.raw_serialize())  #/
 >>> # encode to base58 using h160_to_p2sh_address, remember testnet=True
@@ -233,7 +233,7 @@ tx:TxTest:test_sign_p2sh_p2wpkh:
 >>> # Example for creating a p2sh-p2wpkh transaction
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, hash256, little_endian_to_int
->>> from script import p2wpkh_script
+>>> from script import P2WPKHScriptPubKey
 >>> from tx import Tx, TxIn, TxOut
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> prev_tx_hex = '6c14a8370da20c7de5ebf216ece3156e99e7d6070442d93b80cdc344b2e80867'
@@ -244,7 +244,7 @@ tx:TxTest:test_sign_p2sh_p2wpkh:
 >>> amount = tx_in.value(testnet=True) - fee
 >>> target_address = 'tb1qdcfewxgnhx4gjev6nafaxfa64zpx7tt470r3au'
 >>> _, _, h160 = decode_bech32(target_address)
->>> script_pubkey = p2wpkh_script(h160)
+>>> script_pubkey = P2WPKHScriptPubKey(h160)
 >>> tx_out = TxOut(amount, script_pubkey)
 >>> tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
 >>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
@@ -264,7 +264,7 @@ and the change back to your p2sh-p2wpkh address.
 >>> from ecc import PrivateKey
 >>> from helper import decode_bech32, decode_base58, hash256, little_endian_to_int
 >>> from network import SimpleNode
->>> from script import p2wpkh_script, p2sh_script
+>>> from script import P2WPKHScriptPubKey, P2SHScriptPubKey
 >>> from tx import Tx, TxIn, TxOut
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> private_key = PrivateKey(little_endian_to_int(hash256(passphrase)))
@@ -280,8 +280,8 @@ and the change back to your p2sh-p2wpkh address.
 >>> tx_outs = []  #/
 >>> # decode the target address to get the hash160 of the address
 >>> _, _, target_h160 = decode_bech32(target_address)  #/
->>> # create the target script pubkey using p2wpkh_script
->>> target_script_pubkey = p2wpkh_script(target_h160)  #/
+>>> # create the target script pubkey using P2WPKHScriptPubKey
+>>> target_script_pubkey = P2WPKHScriptPubKey(target_h160)  #/
 >>> # add the target transaction output
 >>> tx_outs.append(TxOut(target_amount, target_script_pubkey))
 >>> # calculate the change amount, remember you were sent 5000000 sats
@@ -290,8 +290,8 @@ and the change back to your p2sh-p2wpkh address.
 >>> p2sh_address = private_key.point.p2sh_p2wpkh_address()  #/
 >>> # get the hash160 by decoding the p2sh-p2wpkh address
 >>> change_h160 = decode_base58(p2sh_address)
->>> # create the change script pubkey using p2sh_script
->>> change_script_pubkey = p2sh_script(change_h160)  #/
+>>> # create the change script pubkey using P2SHScriptPubKey
+>>> change_script_pubkey = P2SHScriptPubKey(change_h160)  #/
 >>> tx_outs.append(TxOut(change_amount, change_script_pubkey))  #/
 >>> # create the transaction with testnet=True and segwit=True
 >>> tx_obj = Tx(1, [tx_in], tx_outs, 0, testnet=True, segwit=True)  #/
@@ -319,7 +319,7 @@ from helper import (
     read_varstr,
     SIGHASH_ALL,
 )
-from script import p2pkh_script
+from script import P2PKHScriptPubKey
 from tx import Tx, TxIn, TxOut
 
 
@@ -375,7 +375,7 @@ def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
     else:
         script_pubkey = tx_in.script_pubkey(self.testnet)
         h160 = script_pubkey.commands[1]
-    s += p2pkh_script(h160).serialize()
+    s += P2PKHScriptPubKey(h160).serialize()
     s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
     s += int_to_little_endian(tx_in.sequence, 4)
     s += self.hash_outputs()

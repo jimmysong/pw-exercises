@@ -302,7 +302,6 @@ from helper import (
     read_varstr,
     SIGHASH_ALL,
 )
-from script import p2pkh_script
 from tx import Tx, TxIn, TxOut
 
 

@@ -19,7 +19,14 @@ from helper import (
     read_varstr,
     SIGHASH_ALL,
 )
-from script import p2pkh_script, Script
+from script import (
+    P2PKHScriptPubKey,
+    P2SHScriptPubKey,
+    P2WPKHScriptPubKey,
+    RedeemScript,
+    Script,
+    ScriptPubKey,
+)
 
 
 class TxFetcher:
@@ -345,7 +352,7 @@ class Tx:
             # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
             h160 = script_pubkey.commands[1]
         # turn the hash160 into the serialized p2pkh script and add it
-        s += p2pkh_script(h160).serialize()
+        s += P2PKHScriptPubKey(h160).serialize()
         # add the value of the input in 8 bytes, little endian
         s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
         # add the sequence of the input in 4 bytes, little endian
@@ -366,33 +373,21 @@ class Tx:
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
-        if script_pubkey.is_p2sh_script_pubkey():
+        if isinstance(script_pubkey, P2SHScriptPubKey):
             # the last command has to be the redeem script to trigger
             command = tx_in.script_sig.commands[-1]
             # parse the redeem script
             redeem_script = Script.parse(BytesIO(encode_varstr(command)))
             # the redeem script might be a segwit pubkey
-            if redeem_script.is_p2wpkh_script_pubkey():
+            if redeem_script.is_p2wpkh():
                 z = self.sig_hash_bip143(input_index, redeem_script)
-                witness = tx_in.witness
-            elif redeem_script.is_p2wsh_script_pubkey():
-                command = tx_in.witness[-1]
-                raw_witness = encode_varint(len(command)) + command
-                witness_script = Script.parse(BytesIO(raw_witness))
-                z = self.sig_hash_bip143(input_index, witness_script=witness_script)
                 witness = tx_in.witness
             else:
                 z = self.sig_hash(input_index, redeem_script)
                 witness = None
         else:
-            if script_pubkey.is_p2wpkh_script_pubkey():
+            if script_pubkey.is_p2wpkh():
                 z = self.sig_hash_bip143(input_index)
-                witness = tx_in.witness
-            elif script_pubkey.is_p2wsh_script_pubkey():
-                command = tx_in.witness[-1]
-                raw_witness = encode_varint(len(command)) + command
-                witness_script = Script.parse(BytesIO(raw_witness))
-                z = self.sig_hash_bip143(input_index, witness_script=witness_script)
                 witness = tx_in.witness
             else:
                 z = self.sig_hash(input_index)
@@ -470,12 +465,12 @@ class Tx:
         tx_in = self.tx_ins[input_index]
         # find the previous ScriptPubKey
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
-        # if the script_pubkey is p2pkh (use is_p2pkh_script_pubkey), send to sign_p2pkh
-        if script_pubkey.is_p2pkh_script_pubkey():
+        # if the script_pubkey is p2pkh, send to sign_p2pkh
+        if isinstance(script_pubkey, P2PKHScriptPubKey):
             return self.sign_p2pkh(input_index, private_key)
-        elif script_pubkey.is_p2wpkh_script_pubkey():
+        elif isinstance(script_pubkey, P2WPKHScriptPubKey):
             return self.sign_p2wpkh(input_index, private_key)
-        elif redeem_script and redeem_script.is_p2wpkh_script_pubkey():
+        elif redeem_script and redeem_script.is_p2wpkh():
             return self.sign_p2sh_p2wpkh(input_index, private_key)
         # else return a RuntimeError
         else:
@@ -611,7 +606,7 @@ class TxOut:
         amount = little_endian_to_int(s.read(8))
         # script_pubkey is a variable field (length followed by the data)
         # you can use Script.parse to get the actual script
-        script_pubkey = Script.parse(s)
+        script_pubkey = ScriptPubKey.parse(s)
         # return an instance of the class (cls(...))
         return cls(amount, script_pubkey)
 
@@ -755,9 +750,9 @@ class TxTest(TestCase):
         tx_ins.append(TxIn(prev_tx, 0))
         tx_outs = []
         h160 = decode_base58('mzx5YhAH9kNHtcN481u6WkjeHjYtVeKVh2')
-        tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=p2pkh_script(h160)))
+        tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=P2PKHScriptPubKey(h160)))
         h160 = decode_base58('mnrVtF8DWjMu839VW3rBfgYaAfKk8983Xf')
-        tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=p2pkh_script(h160)))
+        tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=P2PKHScriptPubKey(h160)))
         tx = Tx(1, tx_ins, tx_outs, 0, testnet=True)
         self.assertTrue(tx.sign_p2pkh(0, private_key))
 
@@ -769,7 +764,7 @@ class TxTest(TestCase):
         tx_in = TxIn(prev_tx, prev_index)
         amount = tx_in.value(testnet=True) - fee
         h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
-        tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
+        tx_out = TxOut(amount=amount, script_pubkey=P2PKHScriptPubKey(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         self.assertTrue(t.sign_input(0, private_key))
         want = '0100000000010197ad6fb37f5764c85b375639cbd07dfafd94c2ed18f2fb6cad9fdd329507fa6b0000000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac02483045022100feab5b8feefd5e774bdfdc1dc23525b40f1ffaa25a376f8453158614f00fa6cb02204456493d0bc606ebeb3fa008e056bbc96a67cb0c11abcc871bfc2bec60206bf0012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
@@ -784,7 +779,7 @@ class TxTest(TestCase):
         tx_in = TxIn(prev_tx, prev_index)
         amount = tx_in.value(testnet=True) - fee
         h160 = decode_base58('mqYz6JpuKukHzPg94y4XNDdPCEJrNkLQcv')
-        tx_out = TxOut(amount=amount, script_pubkey=p2pkh_script(h160))
+        tx_out = TxOut(amount=amount, script_pubkey=P2PKHScriptPubKey(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         self.assertTrue(t.sign_input(0, private_key, redeem_script=redeem_script))
         want = '01000000000101e92e1c1d29218348f8ec9463a9fc94670f675a7f82ae100f3e8a5cbd63b4192e0100000017160014d52ad7ca9b3d096a38e752c2018e6fbc40cdf26fffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac0247304402205e3ae5ac9a0e0a16ae04b0678c5732973ce31051ba9f42193e69843e600d84f2022060a91cbd48899b1bf5d1ffb7532f69ab74bc1701a253a415196b38feb599163b012103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b6700000000'
@@ -797,9 +792,9 @@ class TxTest(TestCase):
         tx_ins.append(TxIn(prev_tx, 0))
         tx_outs = []
         h160 = decode_base58('mzx5YhAH9kNHtcN481u6WkjeHjYtVeKVh2')
-        tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=p2pkh_script(h160)))
+        tx_outs.append(TxOut(amount=int(0.99 * 100000000), script_pubkey=P2PKHScriptPubKey(h160)))
         h160 = decode_base58('mnrVtF8DWjMu839VW3rBfgYaAfKk8983Xf')
-        tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=p2pkh_script(h160)))
+        tx_outs.append(TxOut(amount=int(0.1 * 100000000), script_pubkey=P2PKHScriptPubKey(h160)))
         tx = Tx(1, tx_ins, tx_outs, 0, testnet=True)
         self.assertTrue(tx.sign_input(0, private_key))
 

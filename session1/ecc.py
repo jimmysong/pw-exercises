@@ -473,16 +473,17 @@ class S256Point(Point):
 
     def p2sh_p2wpkh_redeem_script(self):
         '''Returns the RedeemScript for a p2sh-p2wpkh redemption'''
-        from script import p2wpkh_script  # avoid circular dependency
+        # avoid circular dependency
+        from script import P2WPKHScriptPubKey
         # get the p2sh-p2wpkh RedeemScript using p2wpkh_script on the hash160
-        return p2wpkh_script(self.hash160())
+        return P2WPKHScriptPubKey(self.hash160()).redeem_script()
 
     def p2sh_p2wpkh_address(self, testnet=False):
         '''Returns the p2sh-p2wpkh base58 address string'''
         # get the p2sh-p2wpkh RedeemScript
         redeem_script = self.p2sh_p2wpkh_redeem_script()
         # return the RedeemScript's p2sh_address, remember to pass in testnet
-        return redeem_script.p2sh_address(testnet)
+        return redeem_script.address(testnet)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking

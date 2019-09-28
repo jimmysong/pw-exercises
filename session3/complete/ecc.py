@@ -473,9 +473,9 @@ class S256Point(Point):
 
     def p2sh_p2wpkh_redeem_script(self):
         '''Returns the RedeemScript for a p2sh-p2wpkh redemption'''
-        from script import p2wpkh_script  # avoid circular dependency
-        # get the p2sh-p2wpkh RedeemScript using p2wpkh_script on the hash160
-        return p2wpkh_script(self.hash160())
+        from script import P2WPKHScriptPubKey  # avoid circular dependency
+        # get the p2sh-p2wpkh RedeemScript using P2WPKHScriptPubKey on the hash160
+        return P2WPKHScriptPubKey(self.hash160())
 
     def p2sh_p2wpkh_address(self, testnet=False):
         '''Returns the p2sh-p2wpkh base58 address string'''

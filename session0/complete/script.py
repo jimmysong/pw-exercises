@@ -125,7 +125,7 @@ class Script:
         # encode_varint the total length of the result and prepend
         return encode_varint(total) + result
 
-    def evaluate(self, z, witness):
+    def evaluate(self, z):
         # create a copy as we may need to add to this list if we have a
         # RedeemScript
         commands = self.commands[:]
@@ -182,32 +182,31 @@ class Script:
                     # hashes match! now add the RedeemScript
                     stream = BytesIO(redeem_script)
                     commands.extend(Script.parse(stream).commands)
-                # witness program version 0 rule. if stack commands are:
-                # 0 <20 byte hash> this is p2wpkh
-                if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 20:
-                    h160 = stack.pop()
-                    stack.pop()
-                    commands.extend(witness)
-                    commands.extend(p2pkh_script(h160).commands)
-                # witness program version 0 rule. if stack commands are:
-                # 0 <32 byte hash> this is p2wsh
-                if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 32:
-                    h256 = stack.pop()
-                    stack.pop()
-                    commands.extend(witness[:-1])
-                    witness_script = witness[-1]
-                    if h256 != sha256(witness_script):
-                        print('bad sha256 {} vs {}'.format(h256.hex(), sha256(witness_script).hex()))
-                        return False
-                    # hashes match! now add the Witness Script
-                    stream = BytesIO(encode_varint(len(witness_script)) + witness_script)
-                    witness_script_commands = Script.parse(stream).commands
-                    commands.extend(witness_script_commands)
         if len(stack) == 0:
             return False
         if stack.pop() == b'':
             return False
         return True
+
+    def is_p2pkh(self):
+        '''Returns whether the script follows the
+        OP_DUP OP_HASH160 <20 byte hash> OP_EQUALVERIFY OP_CHECKSIG pattern.'''
+        # there should be exactly 5 commands
+        # OP_DUP (0x76), OP_HASH160 (0xa9), 20-byte hash, OP_EQUALVERIFY (0x88),
+        # OP_CHECKSIG (0xac)
+        return len(self.commands) == 5 and self.commands[0] == 0x76 \
+            and self.commands[1] == 0xa9 \
+            and type(self.commands[2]) == bytes and len(self.commands[2]) == 20 \
+            and self.commands[3] == 0x88 and self.commands[4] == 0xac
+
+    def is_p2sh(self):
+        '''Returns whether the script follows the
+        OP_HASH160 <20 byte hash> OP_EQUAL pattern.'''
+        # there should be exactly 3 commands
+        # OP_HASH160 (0xa9), 20-byte hash, OP_EQUAL (0x87)
+        return len(self.commands) == 3 and self.commands[0] == 0xa9 \
+            and type(self.commands[1]) == bytes and len(self.commands[1]) == 20 \
+            and self.commands[2] == 0x87
 
 
 class ScriptTest(TestCase):
@@ -225,6 +224,20 @@ class ScriptTest(TestCase):
         script_pubkey = BytesIO(bytes.fromhex(want))
         script = Script.parse(script_pubkey)
         self.assertEqual(script.serialize().hex(), want)
+
+
+class ScriptPubKey(Script):
+    '''Represents a ScriptPubKey in a transaction'''
+
+    @classmethod
+    def parse(cls, s):
+        script_pubkey = super().parse(s)
+        if script_pubkey.is_p2pkh():
+            return P2PKHScriptPubKey(script_pubkey.commands[2])
+        elif script_pubkey.is_p2sh():
+            return P2SHScriptPubKey(script_pubkey.commands[1])
+        else:
+            return script_pubkey
 
 
 class P2PKHScriptPubKey(Script):

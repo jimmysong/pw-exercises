@@ -109,7 +109,7 @@ Then create a transaction to send all the coins to `mqYz6JpuKukHzPg94y4XNDdPCEJr
 This is a one input, one output transaction.
 ---
 >>> from helper import decode_base58
->>> from script import p2pkh_script
+>>> from script import P2PKHScriptPubKey
 >>> from tx import Tx, TxIn, TxOut
 >>> # this should be the transaction ID and index from the transaction from the faucet
 >>> prev_tx_hex = 'aec4b5bfa8952a80a93e9afd437f4783e51d363303c021f68c7a614ca8a153e4'  #/prev_tx_hex = '<fill this in>'
@@ -123,8 +123,8 @@ This is a one input, one output transaction.
 >>> output_amount = tx_in.value(testnet=True) - fee  #/
 >>> # calculate the hash160 using decode_base58 on the target_address
 >>> h160 = decode_base58(target_address)  #/
->>> # convert the h160 to a p2pkh script using p2pkh_script
->>> script_pubkey = p2pkh_script(h160)  #/
+>>> # convert the h160 to a p2pkh script using P2PKHScriptPubKey
+>>> script_pubkey = P2PKHScriptPubKey(h160)  #/
 >>> # create the transaction output
 >>> tx_out = TxOut(output_amount, script_pubkey)  #/
 >>> # create the transaction with version=1, locktime=0, testnet=True
@@ -151,6 +151,7 @@ import helper
 
 from ecc import PrivateKey, S256Point
 from helper import encode_varint, hash256, read_varint
+from script import P2PKHScriptPubKey
 from tx import Tx
 
 
@@ -180,7 +181,7 @@ def verify_message(self, message, sig):
 def sign_input(self, input_index, private_key):
     tx_in = self.tx_ins[input_index]
     script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
-    if script_pubkey.is_p2pkh_script_pubkey():
+    if isinstance(script_pubkey, P2PKHScriptPubKey):
         return self.sign_p2pkh(input_index, private_key)
     else:
         raise RuntimeError('Unknown ScriptPubKey')
