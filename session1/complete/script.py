@@ -284,13 +284,6 @@ class Script:
         # raise a ValueError
         raise ValueError('Unknown ScriptPubKey')
 
-    def p2sh_address(self, testnet=False):
-        '''Assumes this is a RedeemScript. Returns the p2sh address.'''
-        # get the hash160 of the current script's raw serialization
-        h160 = hash160(self.raw_serialize())
-        # convert this to a p2sh address
-        return h160_to_p2sh_address(h160, testnet)
-
 
 class ScriptTest(TestCase):
 
@@ -322,7 +315,32 @@ class ScriptTest(TestCase):
         address_4 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
         self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_4)
 
-    def test_p2sh_address(self):
-        hex_raw_redeem_script = '475221022626e955ea6ea6d98850c994f9107b036b1334f18ca8830bfff1295d21cfdb702103b287eaf122eea69030a0e9feed096bed8045c8b98bec453e1ffac7fbdbd4bb7152ae'
-        redeem_script = Script.parse(BytesIO(bytes.fromhex(hex_raw_redeem_script)))
-        self.assertEqual(redeem_script.p2sh_address(), '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh')
+
+class RedeemScript(Script):
+    '''Subclass that represents a RedeemScript for p2sh'''
+
+    def hash160(self):
+        '''Returns the hash160 of the serialization of the RedeemScript'''
+        return hash160(self.raw_serialize())
+
+    def script_pubkey(self):
+        '''Returns the ScriptPubKey that this RedeemScript corresponds to'''
+        return p2sh_script(self.hash160())
+    
+    def address(self, testnet=False):
+        '''Returns the p2sh address for this RedeemScript'''
+        return h160_to_p2sh_address(self.hash160(), testnet)
+
+
+class RedeemScriptTest(TestCase):
+
+    def test_redeem_script(self):
+        hex_redeem_script = '4752210223136797cb0d7596cb5bd476102fe3aface2a06338e1afabffacf8c3cab4883c210385c865e61e275ba6fda4a3167180fc5a6b607150ff18797ee44737cd0d34507b52ae'
+        stream = BytesIO(bytes.fromhex(hex_redeem_script))
+        redeem_script = RedeemScript.parse(stream)
+        want = '36b865d5b9664193ea1db43d159edf9edf943802'
+        self.assertEqual(redeem_script.hash160().hex(), want)
+        want = '17a91436b865d5b9664193ea1db43d159edf9edf94380287'
+        self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
+        want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
+        self.assertEqual(redeem_script.address(testnet=True), want)

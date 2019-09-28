@@ -4,9 +4,9 @@ from unittest import TestCase
 from helper import (
     byte_to_int,
     decode_base58,
+    encode_base58_checksum,
     encode_varint,
-    h160_to_p2pkh_address,
-    h160_to_p2sh_address,
+    hash160,
     int_to_byte,
     read_varint,
     sha256,
@@ -18,26 +18,6 @@ from op import (
     OP_CODE_FUNCTIONS,
     OP_CODE_NAMES,
 )
-
-
-def p2pkh_script(h160):
-    '''Takes a hash160 and returns the p2pkh scriptPubKey'''
-    return Script([0x76, 0xa9, h160, 0x88, 0xac])
-
-
-def p2sh_script(h160):
-    '''Takes a hash160 and returns the p2sh scriptPubKey'''
-    return Script([0xa9, h160, 0x87])
-
-
-def p2wpkh_script(h160):
-    '''Takes a hash160 and returns the p2wpkh scriptPubKey'''
-    return Script([0x00, h160])
-
-
-def p2wsh_script(h256):
-    '''Takes a hash160 and returns the p2wsh scriptPubKey'''
-    return Script([0x00, h256])
 
 
 class Script:
@@ -229,61 +209,6 @@ class Script:
             return False
         return True
 
-    def is_p2pkh_script_pubkey(self):
-        '''Returns whether this follows the
-        OP_DUP OP_HASH160 <20 byte hash> OP_EQUALVERIFY OP_CHECKSIG pattern.'''
-        # there should be exactly 5 commands
-        # OP_DUP (0x76), OP_HASH160 (0xa9), 20-byte hash, OP_EQUALVERIFY (0x88),
-        # OP_CHECKSIG (0xac)
-        return len(self.commands) == 5 and self.commands[0] == 0x76 \
-            and self.commands[1] == 0xa9 \
-            and type(self.commands[2]) == bytes and len(self.commands[2]) == 20 \
-            and self.commands[3] == 0x88 and self.commands[4] == 0xac
-
-    def is_p2sh_script_pubkey(self):
-        '''Returns whether this follows the
-        OP_HASH160 <20 byte hash> OP_EQUAL pattern.'''
-        # there should be exactly 3 commands
-        # OP_HASH160 (0xa9), 20-byte hash, OP_EQUAL (0x87)
-        return len(self.commands) == 3 and self.commands[0] == 0xa9 \
-            and type(self.commands[1]) == bytes and len(self.commands[1]) == 20 \
-            and self.commands[2] == 0x87
-
-    def is_p2wpkh_script_pubkey(self):
-        '''Returns whether this follows the
-        OP_0 <20 byte hash> pattern.'''
-        return len(self.commands) == 2 and self.commands[0] == 0x00 \
-            and type(self.commands[1]) == bytes and len(self.commands[1]) == 20
-
-    def is_p2wsh_script_pubkey(self):
-        '''Returns whether this follows the
-        OP_0 <20 byte hash> pattern.'''
-        return len(self.commands) == 2 and self.commands[0] == 0x00 \
-            and type(self.commands[1]) == bytes and len(self.commands[1]) == 32
-
-    def hash160(self):
-        # if p2pkh
-        if self.is_p2pkh_script_pubkey():  # p2pkh
-            # hash160 is the 3rd command
-            return self.commands[2]
-        elif self.is_p2sh_script_pubkey():  # p2sh
-            # hash160 is the 2nd command
-            return self.commands[1]
-        return None
-
-    def address(self, testnet=False):
-        '''Returns the address corresponding to the script'''
-        # if p2pkh
-        if self.is_p2pkh_script_pubkey():  # p2pkh
-            # convert to p2pkh address using h160_to_p2pkh_address (remember testnet)
-            return h160_to_p2pkh_address(self.hash160(), testnet)
-        # if p2sh
-        elif self.is_p2sh_script_pubkey():  # p2sh
-            # convert to p2sh address using h160_to_p2sh_address (remember testnet)
-            return h160_to_p2sh_address(self.hash160(), testnet)
-        # raise a ValueError
-        raise ValueError('Unknown ScriptPubKey')
-
 
 class ScriptTest(TestCase):
 
@@ -301,16 +226,92 @@ class ScriptTest(TestCase):
         script = Script.parse(script_pubkey)
         self.assertEqual(script.serialize().hex(), want)
 
+
+class P2PKHScriptPubKey(Script):
+
+    def __init__(self, h160):
+        if type(h160) != bytes:
+            raise TypeError('To initialize P2PKHScriptPubKey, a hash160 is needed')
+        self.commands = [0x76, 0xa9, h160, 0x88, 0xac]
+
+    def hash160(self):
+        return self.commands[2]
+
+    def address(self, testnet=False):
+        if testnet:
+            prefix = b'\x6f'
+        else:
+            prefix = b'\x00'
+        # return the encode_base58_checksum the prefix and h160
+        return encode_base58_checksum(prefix + self.hash160())
+
+
+class TestP2PKHScriptPubKey(TestCase):
+
     def test_address(self):
         address_1 = '1BenRpVUFK65JFWcQSuHnJKzc4M8ZP8Eqa'
         h160 = decode_base58(address_1)
-        p2pkh_script_pubkey = p2pkh_script(h160)
+        p2pkh_script_pubkey = P2PKHScriptPubKey(h160)
         self.assertEqual(p2pkh_script_pubkey.address(), address_1)
         address_2 = 'mrAjisaT4LXL5MzE81sfcDYKU3wqWSvf9q'
         self.assertEqual(p2pkh_script_pubkey.address(testnet=True), address_2)
-        address_3 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
-        h160 = decode_base58(address_3)
-        p2sh_script_pubkey = p2sh_script(h160)
-        self.assertEqual(p2sh_script_pubkey.address(), address_3)
-        address_4 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
-        self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_4)
+
+
+class P2SHScriptPubKey(Script):
+
+    def __init__(self, h160):
+        if type(h160) != bytes:
+            raise TypeError('To initialize P2SHScriptPubKey, a hash160 is needed')
+        self.commands = [0xa9, h160, 0x87]
+
+    def hash160(self):
+        return self.commands[1]
+
+    def address(self, testnet=False):
+        if testnet:
+            prefix = b'\xc4'
+        else:
+            prefix = b'\x05'
+        # return the encode_base58_checksum the prefix and h160
+        return encode_base58_checksum(prefix + self.hash160())
+
+
+class TestP2SHScriptPubKey(TestCase):
+
+    def test_address(self):
+        address_1 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
+        h160 = decode_base58(address_1)
+        p2sh_script_pubkey = P2SHScriptPubKey(h160)
+        self.assertEqual(p2sh_script_pubkey.address(), address_1)
+        address_2 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
+        self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_2)
+
+
+class RedeemScript(Script):
+    '''Subclass that represents a RedeemScript for p2sh'''
+
+    def hash160(self):
+        '''Returns the hash160 of the serialization of the RedeemScript'''
+        return hash160(self.raw_serialize())
+
+    def script_pubkey(self):
+        '''Returns the ScriptPubKey that this RedeemScript corresponds to'''
+        return P2SHScriptPubKey(self.hash160())
+    
+    def address(self, testnet=False):
+        '''Returns the p2sh address for this RedeemScript'''
+        return self.script_pubkey().address(testnet)
+
+
+class RedeemScriptTest(TestCase):
+
+    def test_redeem_script(self):
+        hex_redeem_script = '4752210223136797cb0d7596cb5bd476102fe3aface2a06338e1afabffacf8c3cab4883c210385c865e61e275ba6fda4a3167180fc5a6b607150ff18797ee44737cd0d34507b52ae'
+        stream = BytesIO(bytes.fromhex(hex_redeem_script))
+        redeem_script = RedeemScript.parse(stream)
+        want = '36b865d5b9664193ea1db43d159edf9edf943802'
+        self.assertEqual(redeem_script.hash160().hex(), want)
+        want = '17a91436b865d5b9664193ea1db43d159edf9edf94380287'
+        self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
+        want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
+        self.assertEqual(redeem_script.address(testnet=True), want)
