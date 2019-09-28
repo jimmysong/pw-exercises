@@ -2,14 +2,14 @@ from io import BytesIO
 from unittest import TestCase
 
 from helper import (
+    byte_to_int,
     decode_base58,
     encode_varint,
     encode_varstr,
     h160_to_p2pkh_address,
     h160_to_p2sh_address,
     hash160,
-    int_to_little_endian,
-    little_endian_to_int,
+    int_to_byte,
     read_varint,
     sha256,
 )
@@ -92,12 +92,12 @@ class Script:
                 count += n
             elif current_byte == 76:
                 # op_pushdata1
-                data_length = little_endian_to_int(s.read(1))
+                data_length = byte_to_int(s.read(1))
                 commands.append(s.read(data_length))
                 count += data_length + 1
             elif current_byte == 77:
                 # op_pushdata2
-                data_length = little_endian_to_int(s.read(2))
+                data_length = byte_to_int(s.read(2))
                 commands.append(s.read(data_length))
                 count += data_length + 2
             else:
@@ -116,8 +116,8 @@ class Script:
         for command in self.commands:
             # if the command is an integer, it's an op code
             if type(command) == int:
-                # turn the command into a single byte integer using int_to_little_endian
-                result += int_to_little_endian(command, 1)
+                # turn the command into a single byte integer using int_to_byte
+                result += int_to_byte(command)
             else:
                 # otherwise, this is an element
                 # get the length in bytes
@@ -125,15 +125,15 @@ class Script:
                 # for large lengths, we have to use a pushdata op code
                 if length < 75:
                     # turn the length into a single byte integer
-                    result += int_to_little_endian(length, 1)
+                    result += int_to_byte(length)
                 elif length > 75 and length < 0x100:
                     # 76 is pushdata1
-                    result += int_to_little_endian(76, 1)
-                    result += int_to_little_endian(length, 1)
+                    result += int_to_byte(76, 1)
+                    result += int_to_byte(length, 1)
                 elif length >= 0x100 and length <= 520:
                     # 77 is pushdata2
-                    result += int_to_little_endian(77, 1)
-                    result += int_to_little_endian(length, 2)
+                    result += int_to_byte(77, 1)
+                    result += int_to_byte(length, 2)
                 else:
                     raise ValueError('too long a command')
                 result += command

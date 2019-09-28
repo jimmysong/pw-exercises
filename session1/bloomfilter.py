@@ -1,6 +1,12 @@
 from unittest import TestCase
 
-from helper import bit_field_to_bytes, encode_varint, int_to_little_endian, murmur3
+from helper import (
+    bit_field_to_bytes,
+    encode_varint,
+    int_to_byte,
+    int_to_little_endian,
+    murmur3,
+)
 from network import GenericMessage
 
 
@@ -42,7 +48,7 @@ class BloomFilter:
         # tweak is 4 bytes little endian
         payload += int_to_little_endian(self.tweak, 4)
         # flag is 1 byte little endian
-        payload += int_to_little_endian(flag, 1)
+        payload += int_to_byte(flag)
         # return a GenericMessage with b'filterload' as the command
         return GenericMessage(b'filterload', payload)
 

@@ -6,9 +6,12 @@ import requests
 
 from ecc import PrivateKey
 from helper import (
+    big_endian_to_int,
     decode_base58,
     hash256,
     encode_varint,
+    int_to_big_endian,
+    int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
     read_varint,
@@ -220,10 +223,10 @@ class Tx:
             result += tx_out.serialize()
         # add the witness data
         for tx_in in self.tx_ins:
-            result += int_to_little_endian(len(tx_in.witness), 1)
+            result += encode_varint(len(tx_in.witness))
             for item in tx_in.witness:
                 if type(item) == int:
-                    result += int_to_little_endian(item, 1)
+                    result += int_to_byte(item)
                 else:
                     result += encode_varint(len(item)) + item
         # serialize locktime (4 bytes, little endian)
@@ -287,8 +290,8 @@ class Tx:
         s += int_to_little_endian(SIGHASH_ALL, 4)
         # hash256 the serialization
         h256 = hash256(s)
-        # convert the result to an integer using int.from_bytes(x, 'big')
-        return int.from_bytes(h256, 'big')
+        # convert the result to an integer using big_endian_to_int(x)
+        return big_endian_to_int(h256)
 
     def hash_prevouts(self):
         if self._hash_prevouts is None:
@@ -334,7 +337,7 @@ class Tx:
         s += self.hash_outputs()
         s += int_to_little_endian(self.locktime, 4)
         s += int_to_little_endian(SIGHASH_ALL, 4)
-        return int.from_bytes(hash256(s), 'big')
+        return big_endian_to_int(hash256(s))
 
     def verify_input(self, input_index):
         '''Returns whether the input has a valid signature'''
@@ -347,7 +350,7 @@ class Tx:
             # the last command has to be the redeem script to trigger
             command = tx_in.script_sig.commands[-1]
             # parse the redeem script
-            raw_redeem = int_to_little_endian(len(command), 1) + command
+            raw_redeem = encode_varint(len(command)) + command
             redeem_script = Script.parse(BytesIO(raw_redeem))
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh_script_pubkey():
@@ -395,8 +398,8 @@ class Tx:
         z = self.sig_hash(input_index)
         # get der signature of z from private key
         der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
-        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
         sec = private_key.point.sec()
         # initialize a new script with [sig, sec] as the elements
@@ -409,10 +412,15 @@ class Tx:
     def sign_input(self, input_index, private_key):
         '''Signs the input by figuring out what type of ScriptPubKey the previous output was'''
         # get the input
+        tx_in = self.tx_ins[input_index]
         # find the previous ScriptPubKey
+        script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # if the script_pubkey is p2pkh (use is_p2pkh_script_pubkey), send to sign_p2pkh
+        if script_pubkey.is_p2pkh_script_pubkey():
+            return self.sign_p2pkh(input_index, private_key)
         # else return a RuntimeError
-        raise NotImplementedError
+        else:
+            raise RuntimeError('Unknown ScriptPubKey')
 
     def is_coinbase(self):
         '''Returns whether this transaction is a coinbase transaction or not'''

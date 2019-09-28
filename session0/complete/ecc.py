@@ -5,7 +5,13 @@ from unittest import TestCase
 import hmac
 import hashlib
 
-from helper import encode_base58_checksum, hash160, hash256
+from helper import (
+    big_endian_to_int,
+    encode_base58_checksum,
+    hash160,
+    hash256,
+    int_to_big_endian,
+)
 
 
 class FieldElement:
@@ -428,15 +434,17 @@ class S256Point(Point):
         # returns the binary version of the sec format, NOT hex
         # if compressed, starts with b'\x02' if self.y.num is even, b'\x03' if self.y is odd
         # then self.x.num
-        # remember, you have to convert self.x.num/self.y.num to binary (some_integer.to_bytes(32, 'big'))
+        # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
+        x = int_to_big_endian(self.x.num, 32)
         if compressed:
             if self.y.num % 2 == 0:
-                return b'\x02' + self.x.num.to_bytes(32, 'big')
+                return b'\x02' + x
             else:
-                return b'\x03' + self.x.num.to_bytes(32, 'big')
+                return b'\x03' + x
         else:
             # if non-compressed, starts with b'\x04' followod by self.x and then self.y
-            return b'\x04' + self.x.num.to_bytes(32, 'big') + self.y.num.to_bytes(32, 'big')
+            y = int_to_big_endian(self.y.num, 32)
+            return b'\x04' + x + y
 
     def address(self, compressed=True, testnet=False):
         '''Returns the address string'''
@@ -469,8 +477,8 @@ class S256Point(Point):
         is calculated using hash256 interpreted as a big-endian integer'''
         # calculate the hash256 of the message
         h256 = hash256(message)
-        # z is the big-endian interpretation. use int.from_bytes(x, 'big')
-        z = int.from_bytes(h256, 'big')
+        # z is the big-endian interpretation. use big_endian_to_int
+        z = big_endian_to_int(h256)
         # verify the message using the self.verify method
         return self.verify(z, sig)
 
@@ -605,12 +613,12 @@ class Signature:
 
     def der(self):
         # convert the r part to bytes
-        rbin = self.r.to_bytes(32, byteorder='big')
+        rbin = int_to_big_endian(self.r, 32)
         # if rbin has a high bit, add a 00
         if rbin[0] >= 128:
             rbin = b'\x00' + rbin
         result = bytes([2, len(rbin)]) + rbin
-        sbin = self.s.to_bytes(32, byteorder='big')
+        sbin = int_to_big_endian(self.s, 32)
         # if sbin has a high bit, add a 00
         if sbin[0] >= 128:
             sbin = b'\x00' + sbin
@@ -686,8 +694,8 @@ class PrivateKey:
         v = b'\x01' * 32
         if z > N:
             z -= N
-        z_bytes = z.to_bytes(32, 'big')
-        secret_bytes = self.secret.to_bytes(32, 'big')
+        z_bytes = int_to_big_endian(z, 32)
+        secret_bytes = int_to_big_endian(self.secret, 32)
         s256 = hashlib.sha256
         k = hmac.new(k, v + b'\x00' + secret_bytes + z_bytes, s256).digest()
         v = hmac.new(k, v, s256).digest()
@@ -695,7 +703,7 @@ class PrivateKey:
         v = hmac.new(k, v, s256).digest()
         while True:
             v = hmac.new(k, v, s256).digest()
-            candidate = int.from_bytes(v, 'big')
+            candidate = big_endian_to_int(v)
             if candidate >= 1 and candidate < N:
                 return candidate
             k = hmac.new(k, v + b'\x00', s256).digest()
@@ -707,10 +715,26 @@ class PrivateKey:
         integer.'''
         # compute the hash256 of the message
         h256 = hash256(message)
-        # z is the big-endian interpretation. use int.from_bytes(x, 'big')
-        z = int.from_bytes(h256, 'big')
+        # z is the big-endian interpretation. use big_endian_to_int
+        z = big_endian_to_int(h256)
         # sign the message using the self.sign method
         return self.sign(z)
+
+    def wif(self, compressed=True, testnet=False):
+        # convert the secret from integer to a 32-bytes in big endian using int_to_big_endian(x, 32)
+        secret_bytes = int_to_big_endian(self.secret, 32)
+        # prepend b'\xef' on testnet, b'\x80' on mainnet
+        if testnet:
+            prefix = b'\xef'
+        else:
+            prefix = b'\x80'
+        # append b'\x01' if compressed
+        if compressed:
+            suffix = b'\x01'
+        else:
+            suffix = b''
+        # encode_base58_checksum the whole thing
+        return encode_base58_checksum(prefix + secret_bytes + suffix)
 
 
 class PrivateKeyTest(TestCase):

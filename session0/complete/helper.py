@@ -28,6 +28,31 @@ def str_to_bytes(s, encoding='ascii'):
     return s.encode(encoding)
 
 
+def byte_to_int(b):
+    '''Returns an integer that corresponds to the byte'''
+    return b[0]
+
+def int_to_byte(n):
+    '''Returns a single byte that corresponds to the integer'''
+    if n > 255 or n < 0:
+        raise ValueError('integer greater than 255 or lower than 0 cannot be converted into a byte')
+    return bytes([n])
+
+
+def big_endian_to_int(b):
+    '''little_endian_to_int takes byte sequence as a little-endian number.
+    Returns an integer'''
+    # use the int.from_bytes(b, <endianness>) method
+    return int.from_bytes(b, 'big')
+
+
+def int_to_big_endian(n, length):
+    '''int_to_little_endian takes an integer and returns the little-endian
+    byte sequence of length'''
+    # use the int.to_bytes(length, <endianness>) method
+    return n.to_bytes(length, 'big')
+
+
 def little_endian_to_int(b):
     '''little_endian_to_int takes byte sequence as a little-endian number.
     Returns an integer'''
@@ -36,7 +61,7 @@ def little_endian_to_int(b):
 
 
 def int_to_little_endian(n, length):
-    '''endian_to_little_endian takes an integer and returns the little-endian
+    '''int_to_little_endian takes an integer and returns the little-endian
     byte sequence of length'''
     # use the int.to_bytes(length, <endianness>) method
     return n.to_bytes(length, 'little')
@@ -80,16 +105,29 @@ def encode_base58_checksum(raw):
     return encode_base58(raw + checksum)
 
 
-def decode_base58(s):
+def raw_decode_base58(s):
     num = 0
+    # see how many leading 0's we are starting with
+    prefix = b''
     for c in s:
-        num *= 58
-        num += BASE58_ALPHABET.index(c)
-    combined = num.to_bytes(25, byteorder='big')
+        if num == 0 and c == '1':
+            prefix += b'\x00'
+        else:
+            num = 58*num + BASE58_ALPHABET.index(c)
+    # put everything into base64
+    byte_array = []
+    while num > 0:
+        byte_array.insert(0, num & 255)
+        num >>= 8
+    combined = prefix + bytes(byte_array)
     checksum = combined[-4:]
     if hash256(combined[:-4])[:4] != checksum:
         raise RuntimeError('bad address: {} {}'.format(checksum, hash256(combined)[:4]))
-    return combined[1:-4]
+    return combined[:-4]
+
+
+def decode_base58(s):
+    return raw_decode_base58(s)[1:]
 
 
 def read_varint(s):
@@ -303,6 +341,13 @@ class HelperTest(TestCase):
         self.assertEqual(h160, want)
         got = encode_base58_checksum(b'\x6f' + bytes.fromhex(h160))
         self.assertEqual(got, addr)
+        addr = '1111111111111111111114oLvT2'
+        h160 = decode_base58(addr).hex()
+        want = '0000000000000000000000000000000000000000'
+        self.assertEqual(h160, want)
+        got = encode_base58_checksum(b'\x00' + bytes.fromhex(h160))
+        self.assertEqual(got, addr)
+                
 
     def test_encode_base58_checksum(self):
         raw = bytes.fromhex('005dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69')

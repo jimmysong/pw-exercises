@@ -6,10 +6,13 @@ import requests
 
 from ecc import PrivateKey
 from helper import (
+    big_endian_to_int,
     decode_base58,
     hash256,
     encode_varint,
     encode_varstr,
+    int_to_big_endian,
+    int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
     read_varint,
@@ -226,7 +229,7 @@ class Tx:
         # add the witness data for each input
         for tx_in in self.tx_ins:
             # encode the number of items in the witness in little-endian
-            result += int_to_little_endian(len(tx_in.witness), 1)
+            result += int_to_byte(len(tx_in.witness))
             # iterate through the items in the witness field
             for item in tx_in.witness:
                 # use encode_varstr to encode the item
@@ -292,8 +295,8 @@ class Tx:
         s += int_to_little_endian(SIGHASH_ALL, 4)
         # hash256 the serialization
         h256 = hash256(s)
-        # convert the result to an integer using int.from_bytes(x, 'big')
-        return int.from_bytes(h256, 'big')
+        # convert the result to an integer using big_endian_to_int(x)
+        return big_endian_to_int(h256)
 
     def hash_prevouts(self):
         if self._hash_prevouts is None:
@@ -353,8 +356,8 @@ class Tx:
         s += int_to_little_endian(self.locktime, 4)
         # add the sighash (SIGHASH_ALL) in 4 bytes, little endian
         s += int_to_little_endian(SIGHASH_ALL, 4)
-        # hash256 the whole thing, interpret the as a big endian integer using int.from_bytes(x, 'big')
-        return int.from_bytes(hash256(s), 'big')
+        # hash256 the whole thing, interpret the as a big endian integer using int_to_big_endian
+        return big_endian_to_int(hash256(s))
 
     def verify_input(self, input_index):
         '''Returns whether the input has a valid signature'''
@@ -414,8 +417,8 @@ class Tx:
         z = self.sig_hash(input_index)
         # get der signature of z from private key
         der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
-        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
         sec = private_key.point.sec()
         # initialize a new script with [sig, sec] as the elements
@@ -431,8 +434,8 @@ class Tx:
         z = self.sig_hash_bip143(input_index)
         # get der signature of z from private key
         der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
-        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
         sec = private_key.point.sec()
         # change input's witness to be an array of signature and sec pub key
@@ -452,8 +455,8 @@ class Tx:
         z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
         # get der signature of z from private key
         der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use SIGHASH_ALL.to_bytes(1, 'big'))
-        sig = der + SIGHASH_ALL.to_bytes(1, 'big')
+        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
         sec = private_key.point.sec()
         # change input's witness to be an array of signature and sec pub key
