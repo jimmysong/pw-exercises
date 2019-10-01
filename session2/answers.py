@@ -61,7 +61,7 @@ tb1qk9g26ycdn47n2uhzl0nnj7ayxmzlveuhvzg7vtdkpcl3smkquvgqlp5t8w
 
 #endexercise
 #unittest
-script:ScriptTest:test_p2wsh_address:
+script:WitnessScriptTest:test_address:
 #endunittest
 #code
 >>> # Example for signing a p2wsh input
@@ -158,7 +158,7 @@ True
 #code
 >>> # Example of generating a p2sh-p2wsh address
 >>> from ecc import S256Point
->>> from helper import encode_base58_checksum, hash160, sha256, h160_to_p2sh_address
+>>> from helper import encode_base58_checksum, hash160, sha256
 >>> from script import Script, WitnessScript, P2WSHScriptPubKey
 >>> sec1_hex = '026ccfb8061f235cc110697c0bfb3afb99d82c886672f6b9b5393b25a434c0cbf3'
 >>> sec2_hex = '03befa190c0c22e2f53720b1be9476dcf11917da4665c44c9c71c3a2d28a933c35'
@@ -178,7 +178,7 @@ True
 
 ---
 >>> from ecc import PrivateKey
->>> from helper import encode_varstr, h160_to_p2sh_address, hash160, hash256, sha256, little_endian_to_int
+>>> from helper import encode_varstr, hash160, hash256, sha256, little_endian_to_int
 >>> from script import P2WSHScriptPubKey, Script
 >>> sec2 = bytes.fromhex('031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e')
 >>> sec3 = bytes.fromhex('02618b836fc32578538bb8440f5e89d916844dd828981a9bc33f9a736638b538d2')
@@ -201,7 +201,7 @@ True
 
 #endexercise
 #unittest
-script:ScriptTest:test_p2sh_p2wsh_address:
+script:WitnessScriptTest:test_p2sh_address:
 #endunittest
 #code
 >>> # Example for signing a p2sh-p2wsh input
@@ -293,18 +293,110 @@ True
 from unittest import TestCase
 
 from helper import (
-    encode_varint,
-    encode_varstr,
+    big_endian_to_int,
+    encode_bech32_checksum,
     hash256,
+    int_to_byte,
     int_to_little_endian,
-    little_endian_to_int,
-    read_varint,
-    read_varstr,
     SIGHASH_ALL,
 )
-from tx import Tx, TxIn, TxOut
+from script import (
+    P2PKHScriptPubKey,
+    RedeemScript,
+    Script,
+    WitnessScript,
+)
+from tx import Tx
 
+
+def get_sig_p2wsh_multisig(self, input_index, private_key, witness_script):
+    z = self.sig_hash_bip143(input_index, witness_script=witness_script)
+    der = private_key.sign(z).der()
+    sig = der + int_to_byte(SIGHASH_ALL)
+    return sig
+
+
+def finalize_p2wsh_multisig_input(self, input_index, signatures, witness_script):
+    items = [0, *signatures, witness_script.raw_serialize()]
+    self.tx_ins[input_index].witness = items
+    return self.verify_input(input_index)
+
+
+def finalize_p2sh_p2wsh_multisig_input(self, input_index, signatures, witness_script):
+    tx_in = self.tx_ins[input_index]
+    items = [0, *signatures, witness_script.raw_serialize()]
+    tx_in.witness = items
+    redeem_script = witness_script.script_pubkey()
+    tx_in.script_sig = Script([redeem_script.raw_serialize()])
+    return self.verify_input(input_index)
+
+
+def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
+    tx_in = self.tx_ins[input_index]
+    s = int_to_little_endian(self.version, 4)
+    s += self.hash_prevouts() + self.hash_sequence()
+    s += tx_in.prev_tx[::-1]
+    s += int_to_little_endian(tx_in.prev_index, 4)
+    if witness_script:
+        script_code = witness_script.serialize()
+    elif redeem_script:
+        h160 = redeem_script.commands[1]
+        script_code = P2PKHScriptPubKey(h160).serialize()
+    else:
+        script_pubkey = tx_in.script_pubkey(self.testnet)
+        h160 = script_pubkey.commands[1]
+        script_code = P2PKHScriptPubKey(h160).serialize()
+    s += script_code
+    s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
+    s += int_to_little_endian(tx_in.sequence, 4)
+    s += self.hash_outputs()
+    s += int_to_little_endian(self.locktime, 4)
+    s += int_to_little_endian(SIGHASH_ALL, 4)
+    return big_endian_to_int(hash256(s))
+
+
+def verify_input(self, input_index):
+    tx_in = self.tx_ins[input_index]
+    script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
+    if script_pubkey.is_p2sh():
+        raw_redeem_script = tx_in.script_sig.commands[-1]
+        redeem_script = RedeemScript.convert(raw_redeem_script)
+        if redeem_script.is_p2wpkh():
+            z = self.sig_hash_bip143(input_index, redeem_script)
+        elif redeem_script.is_p2wsh():
+            witness_script = WitnessScript.convert(tx_in.witness[-1])
+            z = self.sig_hash_bip143(input_index, witness_script=witness_script)
+        else:
+            z = self.sig_hash(input_index, redeem_script)
+    else:
+        if script_pubkey.is_p2wpkh():
+            z = self.sig_hash_bip143(input_index)
+        elif script_pubkey.is_p2wsh():
+            witness_script = WitnessScript.convert(tx_in.witness[-1])
+            z = self.sig_hash_bip143(input_index, witness_script=witness_script)
+        else:
+            z = self.sig_hash(input_index)
+    combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
+    return combined_script.evaluate(z, tx_in.witness)
+
+
+def address(self, testnet=False):
+    witness_program = self.script_pubkey().raw_serialize()
+    return encode_bech32_checksum(witness_program, testnet)
+
+
+def p2sh_address(self, testnet=False):
+    redeem_script = self.script_pubkey().redeem_script()
+    return redeem_script.address(testnet)
 
 
 class SessionTest(TestCase):
-    pass
+
+    def test_apply(self):
+        Tx.get_sig_p2wsh_multisig = get_sig_p2wsh_multisig
+        Tx.finalize_p2wsh_multisig_input = finalize_p2wsh_multisig_input
+        Tx.finalize_p2sh_p2wsh_multisig_input = finalize_p2sh_p2wsh_multisig_input
+        Tx.sig_hash_bip143 = sig_hash_bip143
+        Tx.verify_input = verify_input
+        WitnessScript.address = address
+        WitnessScript.p2sh_address = p2sh_address

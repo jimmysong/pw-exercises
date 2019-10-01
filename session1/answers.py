@@ -200,7 +200,7 @@ tx:TxTest:test_verify_p2wpkh:
 
 #endexercise
 #unittest
-script:TestP2SHScriptPubKey:test_address:
+script:P2SHScriptPubKeyTest:test_address:
 #endunittest
 #unittest
 ecc:S256Test:test_p2sh_p2wpkh_address:

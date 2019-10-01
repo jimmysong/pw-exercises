@@ -1,4 +1,3 @@
-
 '''
 #code
 >>> import ecc, helper, tx
@@ -151,6 +150,7 @@ It's annoying to have to already know what the previous output's script type was
 from unittest import TestCase
 
 import helper
+import script
 
 from ecc import PrivateKey, S256Point
 from helper import encode_varint, hash256, read_varint
@@ -195,6 +195,7 @@ class SessionTest(TestCase):
     def test_apply(self):
         helper.read_varstr = read_varstr
         helper.encode_varstr = encode_varstr
+        script.encode_varstr = encode_varstr
         PrivateKey.sign_message = sign_message
         S256Point.verify_message = verify_message
         Tx.sign_input = sign_input

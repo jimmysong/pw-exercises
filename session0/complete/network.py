@@ -3,6 +3,7 @@ import time
 
 from io import BytesIO
 from random import randint
+from time import sleep
 from unittest import TestCase
 
 from block import Block
@@ -450,6 +451,8 @@ class SimpleNode:
 
     def is_tx_accepted(self, tx_obj):
         '''Returns whether a transaction has been accepted on the network'''
+        # sleep for a second to let everything propagate
+        sleep(1)
         # create a GetDataMessage
         get_data = GetDataMessage()
         # ask for the tx

@@ -256,7 +256,7 @@ class P2PKHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class TestP2PKHScriptPubKey(TestCase):
+class P2PKHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '1BenRpVUFK65JFWcQSuHnJKzc4M8ZP8Eqa'
@@ -286,7 +286,7 @@ class P2SHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class TestP2SHScriptPubKey(TestCase):
+class P2SHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
@@ -311,6 +311,11 @@ class RedeemScript(Script):
     def address(self, testnet=False):
         '''Returns the p2sh address for this RedeemScript'''
         return self.script_pubkey().address(testnet)
+
+    @classmethod
+    def convert(cls, raw_redeem_script):
+        stream = BytesIO(encode_varstr(raw_redeem_script))
+        return cls.parse(stream)
 
 
 class RedeemScriptTest(TestCase):

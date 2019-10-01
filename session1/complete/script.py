@@ -214,7 +214,7 @@ class Script:
             and self.commands[2] == 0x87
 
     def is_p2wpkh(self):
-        '''Returns whether this follows the
+        '''Returns whether the script follows the
         OP_0 <20 byte hash> pattern.'''
         return len(self.commands) == 2 and self.commands[0] == 0x00 \
             and type(self.commands[1]) == bytes and len(self.commands[1]) == 20
@@ -276,7 +276,7 @@ class P2PKHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class TestP2PKHScriptPubKey(TestCase):
+class P2PKHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '1BenRpVUFK65JFWcQSuHnJKzc4M8ZP8Eqa'
@@ -306,29 +306,7 @@ class P2SHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class SegwitPubKey(ScriptPubKey):
-
-    def address(self, testnet=False):
-        '''return the bech32 address for the p2wpkh'''
-        # witness program is the raw serialization
-        witness_program = self.raw_serialize()
-        # convert to bech32 address using encode_bech32_checksum
-        return encode_bech32_checksum(witness_program, testnet)
-
-    def p2sh_address(self, testnet=False):
-        # get the RedeemScript equivalent and get its address
-        return self.redeem_script().address(testnet)
-
-
-class P2WPKHScriptPubKey(ScriptPubKey):
-
-    def __init__(self, h160):
-        if type(h160) != bytes:
-            raise TypeError('To initialize P2WPKHScriptPubKey, a hash160 is needed')
-        self.commands = [0x00, h160]
-
-
-class TestP2SHScriptPubKey(TestCase):
+class P2SHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
@@ -354,6 +332,11 @@ class RedeemScript(Script):
         '''Returns the p2sh address for this RedeemScript'''
         return self.script_pubkey().address(testnet)
 
+    @classmethod
+    def convert(cls, raw_redeem_script):
+        stream = BytesIO(encode_varstr(raw_redeem_script))
+        return cls.parse(stream)
+
 
 class RedeemScriptTest(TestCase):
 
@@ -367,3 +350,25 @@ class RedeemScriptTest(TestCase):
         self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
         want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
         self.assertEqual(redeem_script.address(testnet=True), want)
+
+
+class SegwitPubKey(ScriptPubKey):
+
+    def address(self, testnet=False):
+        '''return the bech32 address for the p2wpkh'''
+        # witness program is the raw serialization
+        witness_program = self.raw_serialize()
+        # convert to bech32 address using encode_bech32_checksum
+        return encode_bech32_checksum(witness_program, testnet)
+
+    def p2sh_address(self, testnet=False):
+        # get the RedeemScript equivalent and get its address
+        return self.redeem_script().address(testnet)
+
+
+class P2WPKHScriptPubKey(SegwitPubKey):
+
+    def __init__(self, h160):
+        if type(h160) != bytes:
+            raise TypeError('To initialize P2WPKHScriptPubKey, a hash160 is needed')
+        self.commands = [0x00, h160]

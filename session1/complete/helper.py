@@ -167,7 +167,7 @@ def group_32(s):
     current = 0
     for c in s:
         unused_bits += 8
-        current = current * 256 + c
+        current = (current << 8) + c
         while unused_bits > 5:
             unused_bits -= 5
             result.append(current >> unused_bits)
@@ -220,14 +220,10 @@ def decode_bech32(s):
     num_bytes = (len(data) - 7) * 5 // 8
     bits_to_ignore = (len(data) - 7) * 5 % 8
     number >>= bits_to_ignore
-    hash = number.to_bytes(num_bytes, 'big')
-    if version == 0:
-        version_byte = b'\x00'
-    else:
-        version_byte = encode_varint(version + 0x50)
+    hash = int_to_big_endian(number, num_bytes)
     if num_bytes < 2 or num_bytes > 40:
         raise ValueError('bytes out of range: {}'.format(num_bytes))
-    return [testnet, version_byte, hash]
+    return [testnet, version, hash]
 
 
 def read_varint(s):
@@ -388,6 +384,18 @@ def murmur3(data, seed=0):
     return h1 & 0xffffffff
 
 
+def number_to_op_code_byte(n):
+    '''Returns the OP code for a particular number'''
+    if n < -1 or n > 16:
+        raise ValueError('Not a valid OP code')
+    if n > 0:
+        return bytes([0x50 + n])
+    elif n == 0:
+        return b'\x00'
+    elif n == -1:
+        return b'\x4f'
+
+
 class HelperTest(TestCase):
 
     def test_bytes(self):
@@ -430,6 +438,37 @@ class HelperTest(TestCase):
         raw = bytes.fromhex('005dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69')
         want = '19ZewH8Kk1PDbSNdJ97FP4EiCjTRaZMZQA'
         self.assertEqual(encode_base58_checksum(raw), want)
+
+    def test_bech32(self):
+        tests = [
+            {
+                'hex_script': '00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262',
+                'address': 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
+            },
+            {
+                'hex_script': '00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262',
+                'address': 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
+            },
+            {
+                'hex_script': '00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262',
+                'address': 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
+            },
+            {
+                'hex_script': '00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262',
+                'address': 'tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
+            },
+        ]
+        for test in tests:
+            raw = bytes.fromhex(test['hex_script'])
+            want = test['address']
+            testnet = want[:2] == 'tb'
+            version = BECH32_ALPHABET.index(want[3:4])
+            result = encode_bech32_checksum(raw, testnet=testnet)
+            self.assertEqual(result, want)
+            got_testnet, got_version, got_raw = decode_bech32(result)
+            self.assertEqual(got_testnet, testnet)
+            self.assertEqual(got_version, version)
+            self.assertEqual(got_raw, raw[2:])
 
     def test_merkle_parent(self):
         tx_hash0 = bytes.fromhex('c117ea8ec828342f4dfb0ad6bd140e03a50720ece40169ee38bdc15d9eb64cf5')

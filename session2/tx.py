@@ -11,7 +11,6 @@ from helper import (
     hash256,
     encode_varint,
     encode_varstr,
-    int_to_big_endian,
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
@@ -22,9 +21,6 @@ from helper import (
 )
 from script import (
     P2PKHScriptPubKey,
-    P2SHScriptPubKey,
-    P2WPKHScriptPubKey,
-    P2WSHScriptPubKey,
     RedeemScript,
     Script,
     ScriptPubKey,
@@ -242,11 +238,12 @@ class Tx:
             result += int_to_byte(len(tx_in.witness))
             # iterate through the items in the witness field
             for item in tx_in.witness:
+                # if the item is an integer, convert to op code
+                # using number_to_op_code_byte
                 if type(item) == int:
-                    # convert the number to the OP code
                     result += number_to_op_code_byte(item)
+                # else encode_varstr to encode the item
                 else:
-                    # use encode_varstr to encode the item
                     result += encode_varstr(item)
         # serialize locktime (4 bytes, little endian)
         result += int_to_little_endian(self.locktime, 4)
@@ -352,7 +349,7 @@ class Tx:
         # Exercise 1: account for p2wsh. Check first for the existence of a WitnessScript
         if witness_script:
             # the ScriptCode is the serialized WItnessScript
-            script_code = witness_script.serialize()
+            raise NotImplementedError
         elif redeem_script:
             # for p2sh-p2wpkh, the hash160 is the second command of the redeem script
             h160 = redeem_script.commands[1]
@@ -387,41 +384,39 @@ class Tx:
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
-        if isinstance(script_pubkey, P2SHScriptPubKey):
-            # the last command has to be the redeem script to trigger
-            command = tx_in.script_sig.commands[-1]
-            # parse the redeem script
-            redeem_script = Script.parse(BytesIO(encode_varstr(command)))
+        if script_pubkey.is_p2sh():
+            # the last command of the ScriptSig is the RedeemScript
+            raw_redeem_script = tx_in.script_sig.commands[-1]
+            # convert to RedeemScript
+            redeem_script = RedeemScript.convert(raw_redeem_script)
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh():
+                # calculate the z using sig_hash_bip143
                 z = self.sig_hash_bip143(input_index, redeem_script)
-                witness = tx_in.witness
             elif redeem_script.is_p2wsh():
-                command = tx_in.witness[-1]
-                raw_witness = encode_varint(len(command)) + command
-                witness_script = Script.parse(BytesIO(raw_witness))
-                z = self.sig_hash_bip143(input_index, witness_script=witness_script)
-                witness = tx_in.witness
+                # the last item of the witness is the WitnessScript
+                # use WitnessScript.convert to convert to an actual script
+                # calculate the z using sig_hash_bip143
+                raise NotImplementedError
             else:
+                # calculate z as normal
                 z = self.sig_hash(input_index, redeem_script)
-                witness = None
         else:
             if script_pubkey.is_p2wpkh():
+                # calculate the z using sig_hash_bip143
                 z = self.sig_hash_bip143(input_index)
-                witness = tx_in.witness
             elif script_pubkey.is_p2wsh():
-                command = tx_in.witness[-1]
-                raw_witness = encode_varint(len(command)) + command
-                witness_script = Script.parse(BytesIO(raw_witness))
-                z = self.sig_hash_bip143(input_index, witness_script=witness_script)
-                witness = tx_in.witness
+                # the last item of the witness is the WitnessScript
+                # use WitnessScript.convert to convert to an actual script
+                # calculate the z using sig_hash_bip143
+                raise NotImplementedError
             else:
+                # calculate z as normal
                 z = self.sig_hash(input_index)
-                witness = None
         # combine the scripts
         combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
         # evaluate the combined script
-        return combined_script.evaluate(z, witness)
+        return combined_script.evaluate(z, tx_in.witness)
 
     def verify(self):
         '''Verify this transaction'''
@@ -492,9 +487,9 @@ class Tx:
         # find the previous ScriptPubKey
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # if the script_pubkey is p2pkh, send to sign_p2pkh
-        if isinstance(script_pubkey, P2PKHScriptPubKey):
+        if script_pubkey.is_p2pkh():
             return self.sign_p2pkh(input_index, private_key)
-        elif isinstance(script_pubkey, P2WPKHScriptPubKey):
+        elif script_pubkey.is_p2wpkh():
             return self.sign_p2wpkh(input_index, private_key)
         elif redeem_script and redeem_script.is_p2wpkh():
             return self.sign_p2sh_p2wpkh(input_index, private_key)
@@ -504,38 +499,28 @@ class Tx:
 
     def get_sig_p2wsh_multisig(self, input_index, private_key, witness_script):
         # get the sig_hash (z)
-        z = self.sig_hash_bip143(input_index, witness_script=witness_script)
         # get der signature of z from private key
-        der = private_key.sign(z).der()
         # append the hash_type to der (use int_to_byte(SIGHASH_ALL))
-        sig = der + int_to_byte(SIGHASH_ALL)
         # return the serialized signature
-        return sig
+        raise NotImplementedError
 
     def finalize_p2wsh_multisig_input(self, input_index, signatures, witness_script):
         '''Puts together the signatures for a p2wsh input so the input verifies.'''
         # the format for multisig is [0, each signature, then the WitnessScript (raw-serialization)]
-        items = [0, *signatures, witness_script.raw_serialize()]
         # set the witness of the input to be these items
-        self.tx_ins[input_index].witness = items
         # return whether the input verifies
-        return self.verify_input(input_index)
+        raise NotImplementedError
 
     def finalize_p2sh_p2wsh_multisig_input(self, input_index, signatures, witness_script):
         '''Puts together the signatures for a p2sh-p2wsh input so the input verifies.'''
         # grab the input
-        tx_in = self.tx_ins[input_index]
         # the format for multisig is [0, each signature, then the WitnessScript (raw-serialization)]
-        items = [0, *signatures, witness_script.raw_serialize()]
         # set the witness of the input to be these items
-        tx_in.witness = items
         # the RedeemScript is the p2wsh ScriptPubKey of the WitnessScript
-        redeem_script = witness_script.script_pubkey()
         # set the ScriptSig of the tx_in to be a new script, which is just the RedeemScript raw-serialized
-        tx_in.script_sig = Script([redeem_script.raw_serialize()])
         # return whether the input verifies
-        return self.verify_input(input_index)
-        
+        raise NotImplementedError
+
     def is_coinbase(self):
         '''Returns whether this transaction is a coinbase transaction or not'''
         # check that there is exactly 1 input
@@ -875,7 +860,7 @@ class TxTest(TestCase):
         tx_out = TxOut(amount=amount, script_pubkey=P2PKHScriptPubKey(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         sig1 = t.get_sig_p2wsh_multisig(0, private_key1, witness_script)
-        sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)        
+        sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)
         self.assertTrue(t.finalize_p2wsh_multisig_input(0, [sig1, sig2], witness_script))
         want = '010000000001014aa9549b3747c010d4633adfc4136509d3651a7e60cde9ce1692dfffe320cd610100000000ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac04004730440220325e9f389c4835dab74d644e8c8e295535d9b082d28aefc3fa127e23538051bd022050d68dcecda660d4c01a8443c2b30bd0b3e4b1a405b0f352dcb068210862f6810147304402201abceabfc94903644cf7be836876eaa418cb226e03554c17a71c65b232f4507302202105a8344abae9632d1bc8249a52cf651c4ea02ca5259e20b50d8169c949f5a20147522103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b672103674944c63d8dc3373a88cd1f8403b39b48be07bdb83d51dbbaa34be070c72e1452ae00000000'
         self.assertEqual(t.serialize().hex(), want)
@@ -893,11 +878,10 @@ class TxTest(TestCase):
         tx_out = TxOut(amount=amount, script_pubkey=P2PKHScriptPubKey(h160))
         t = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         sig1 = t.get_sig_p2wsh_multisig(0, private_key1, witness_script)
-        sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)        
+        sig2 = t.get_sig_p2wsh_multisig(0, private_key2, witness_script)
         self.assertTrue(t.finalize_p2sh_p2wsh_multisig_input(0, [sig1, sig2], witness_script))
         want = '01000000000101eeef661fef1f37a8078d01d6f28fdd564a99d8226d9b53946a6c29408e8c2cf900000000232200206ddafd1089f07a2ba9868df71f622801fe11f5452c6ff1f8f51573133828b437ffffffff014c400f00000000001976a9146e13971913b9aa89659a9f53d327baa8826f2d7588ac0400483045022100d31433973b7f8014a4e17d46c4720c6c9bed1ee720dc1f0839dd847fa6972553022039278e98a3c18f4748a2727b99acd41eb1534dcf041a3abefd0c7546c868f55801473044022027be7d616b0930c1edf7ed39cc99edf5975e7b859d3224fe340d55c595c2798f02206c05662d39e5b05cc13f936360d62a482b122ad9791074bbdafec3ddc221b8c00147522103935581e52c354cd2f484fe8ed83af7a3097005b2f9c60bff71d35bd795f54b672103674944c63d8dc3373a88cd1f8403b39b48be07bdb83d51dbbaa34be070c72e1452ae00000000'
         self.assertEqual(t.serialize().hex(), want)
-        
 
     def test_is_coinbase(self):
         raw_tx = bytes.fromhex('01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff5e03d71b07254d696e656420627920416e74506f6f6c20626a31312f4542312f4144362f43205914293101fabe6d6d678e2c8c34afc36896e7d9402824ed38e856676ee94bfdb0c6c4bcd8b2e5666a0400000000000000c7270000a5e00e00ffffffff01faf20b58000000001976a914338c84849423992471bffb1a54a8d9b1d69dc28a88ac00000000')

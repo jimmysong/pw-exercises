@@ -14,13 +14,13 @@ from helper import (
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
+    number_to_op_code_byte,
     read_varint,
     read_varstr,
     SIGHASH_ALL,
 )
 from script import (
     P2PKHScriptPubKey,
-    P2WPKHScriptPubKey,
     RedeemScript,
     Script,
     ScriptPubKey,
@@ -207,7 +207,9 @@ class Tx:
         # add the witness data for each input
             # encode the number of items in the witness in little-endian
             # iterate through the items in the witness field
-                # use encode_varstr to encode the item
+                # if the item is an integer, convert to op code
+                # using number_to_op_code_byte
+                # else encode_varstr to encode the item
         # serialize locktime (4 bytes, little endian)
         raise NotImplementedError
 
@@ -304,9 +306,9 @@ class Tx:
         # add the previous transaction hash in little endian
         # add the previous transaction index in 4 bytes, little endian
         # for p2wpkh, we need the previous script pubkey
-        # Exercise 8: for p2sh-p2wpkh, it's the second command of the redeem script
-            # get the script pubkey associated with the previous output (remember testnet)
-            # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
+            # Exercise 8: for p2sh-p2wpkh, it's the second command of the redeem script
+        # get the script pubkey associated with the previous output (remember testnet)
+        # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
         # turn the hash160 into the serialized p2pkh script and add it
         # add the value of the input in 8 bytes, little endian
         # add the sequence of the input in 4 bytes, little endian
@@ -324,28 +326,28 @@ class Tx:
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
         if script_pubkey.is_p2sh():
-            # the last command has to be the redeem script to trigger
-            command = tx_in.script_sig.commands[-1]
-            # parse the redeem script
-            redeem_script = RedeemScript.parse(BytesIO(encode_varstr(command)))
+            # the last command of the ScriptSig is the RedeemScript
+            raw_redeem_script = tx_in.script_sig.commands[-1]
+            # convert to RedeemScript
+            redeem_script = RedeemScript.convert(raw_redeem_script)
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh():
+                # calculate the z using sig_hash_bip143
                 z = self.sig_hash_bip143(input_index, redeem_script)
-                witness = tx_in.witness
             else:
+                # calculate z as normal
                 z = self.sig_hash(input_index, redeem_script)
-                witness = None
         else:
             if script_pubkey.is_p2wpkh():
+                # calculate the z using sig_hash_bip143
                 z = self.sig_hash_bip143(input_index)
-                witness = tx_in.witness
             else:
+                # calculate z as normal
                 z = self.sig_hash(input_index)
-                witness = None
         # combine the scripts
         combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
         # evaluate the combined script
-        return combined_script.evaluate(z, witness)
+        return combined_script.evaluate(z, tx_in.witness)
 
     def verify(self):
         '''Verify this transaction'''
@@ -403,9 +405,9 @@ class Tx:
         # find the previous ScriptPubKey
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # if the script_pubkey is p2pkh, send to sign_p2pkh
-        if isinstance(script_pubkey, P2PKHScriptPubKey):
+        if script_pubkey.is_p2pkh():
             return self.sign_p2pkh(input_index, private_key)
-        elif isinstance(script_pubkey, P2WPKHScriptPubKey):
+        elif script_pubkey.is_p2wpkh():
             return self.sign_p2wpkh(input_index, private_key)
         elif redeem_script and redeem_script.is_p2wpkh():
             return self.sign_p2sh_p2wpkh(input_index, private_key)

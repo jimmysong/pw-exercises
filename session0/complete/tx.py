@@ -10,7 +10,6 @@ from helper import (
     decode_base58,
     hash256,
     encode_varint,
-    encode_varstr,
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
@@ -235,13 +234,13 @@ class Tx:
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
         if script_pubkey.is_p2sh():
-            # the last command has to be the redeem script to trigger
-            command = tx_in.script_sig.commands[-1]
-            # parse the redeem script
-            redeem_script = RedeemScript.parse(BytesIO(encode_varstr(command)))
+            # the last command of the ScriptSig is the RedeemScript
+            raw_redeem_script = tx_in.script_sig.commands[-1]
+            # convert to RedeemScript
+            redeem_script = RedeemScript.convert(raw_redeem_script)
+            z = self.sig_hash(input_index, redeem_script)
         else:
-            redeem_script = None
-        z = self.sig_hash(input_index, redeem_script)
+            z = self.sig_hash(input_index)
         # combine the scripts
         combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
         # evaluate the combined script
@@ -280,7 +279,7 @@ class Tx:
         # find the previous ScriptPubKey
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # if the script_pubkey is p2pkh, send to sign_p2pkh
-        if isinstance(script_pubkey, P2PKHScriptPubKey):
+        if script_pubkey.is_p2pkh():
             return self.sign_p2pkh(input_index, private_key)
         # else return a RuntimeError
         else:

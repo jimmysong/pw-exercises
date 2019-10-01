@@ -176,7 +176,7 @@ class Script:
                         return False
                     # final result should be a 1
                     if not op_verify(stack):
-                        print('bad p2sh h160 {} {} vs {}'.format(redeem_script.hex(), h160.hex(), hash160(command).hex()))
+                        print('bad p2sh h160')
                         return False
                     # hashes match! now add the RedeemScript
                     stream = BytesIO(redeem_script)
@@ -209,7 +209,7 @@ class Script:
         return True
 
     def is_p2pkh(self):
-        '''Returns whether this follows the
+        '''Returns whether the script follows the
         OP_DUP OP_HASH160 <20 byte hash> OP_EQUALVERIFY OP_CHECKSIG pattern.'''
         # there should be exactly 5 commands
         # OP_DUP (0x76), OP_HASH160 (0xa9), 20-byte hash, OP_EQUALVERIFY (0x88),
@@ -220,7 +220,7 @@ class Script:
             and self.commands[3] == 0x88 and self.commands[4] == 0xac
 
     def is_p2sh(self):
-        '''Returns whether this follows the
+        '''Returns whether the script follows the
         OP_HASH160 <20 byte hash> OP_EQUAL pattern.'''
         # there should be exactly 3 commands
         # OP_HASH160 (0xa9), 20-byte hash, OP_EQUAL (0x87)
@@ -229,13 +229,13 @@ class Script:
             and self.commands[2] == 0x87
 
     def is_p2wpkh(self):
-        '''Returns whether this follows the
+        '''Returns whether the script follows the
         OP_0 <20 byte hash> pattern.'''
         return len(self.commands) == 2 and self.commands[0] == 0x00 \
             and type(self.commands[1]) == bytes and len(self.commands[1]) == 20
 
     def is_p2wsh(self):
-        '''Returns whether this follows the
+        '''Returns whether the script follows the
         OP_0 <32 byte hash> pattern.'''
         return len(self.commands) == 2 and self.commands[0] == 0x00 \
             and type(self.commands[1]) == bytes and len(self.commands[1]) == 32
@@ -297,7 +297,7 @@ class P2PKHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class TestP2PKHScriptPubKey(TestCase):
+class P2PKHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '1BenRpVUFK65JFWcQSuHnJKzc4M8ZP8Eqa'
@@ -327,7 +327,7 @@ class P2SHScriptPubKey(ScriptPubKey):
         return encode_base58_checksum(prefix + self.hash160())
 
 
-class TestP2SHScriptPubKey(TestCase):
+class P2SHScriptPubKeyTest(TestCase):
 
     def test_address(self):
         address_1 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
@@ -336,6 +336,41 @@ class TestP2SHScriptPubKey(TestCase):
         self.assertEqual(p2sh_script_pubkey.address(), address_1)
         address_2 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
         self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_2)
+
+
+class RedeemScript(Script):
+    '''Subclass that represents a RedeemScript for p2sh'''
+
+    def hash160(self):
+        '''Returns the hash160 of the serialization of the RedeemScript'''
+        return hash160(self.raw_serialize())
+
+    def script_pubkey(self):
+        '''Returns the ScriptPubKey that this RedeemScript corresponds to'''
+        return P2SHScriptPubKey(self.hash160())
+
+    def address(self, testnet=False):
+        '''Returns the p2sh address for this RedeemScript'''
+        return self.script_pubkey().address(testnet)
+
+    @classmethod
+    def convert(cls, raw_redeem_script):
+        stream = BytesIO(encode_varstr(raw_redeem_script))
+        return cls.parse(stream)
+
+
+class RedeemScriptTest(TestCase):
+
+    def test_redeem_script(self):
+        hex_redeem_script = '4752210223136797cb0d7596cb5bd476102fe3aface2a06338e1afabffacf8c3cab4883c210385c865e61e275ba6fda4a3167180fc5a6b607150ff18797ee44737cd0d34507b52ae'
+        stream = BytesIO(bytes.fromhex(hex_redeem_script))
+        redeem_script = RedeemScript.parse(stream)
+        want = '36b865d5b9664193ea1db43d159edf9edf943802'
+        self.assertEqual(redeem_script.hash160().hex(), want)
+        want = '17a91436b865d5b9664193ea1db43d159edf9edf94380287'
+        self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
+        want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
+        self.assertEqual(redeem_script.address(testnet=True), want)
 
 
 class SegwitPubKey(ScriptPubKey):
@@ -368,62 +403,13 @@ class P2WSHScriptPubKey(SegwitPubKey):
         self.commands = [0x00, s256]
 
 
-class TestP2SHScriptPubKey(TestCase):
-
-    def test_address(self):
-        address_1 = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
-        h160 = decode_base58(address_1)
-        p2sh_script_pubkey = P2SHScriptPubKey(h160)
-        self.assertEqual(p2sh_script_pubkey.address(), address_1)
-        address_2 = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
-        self.assertEqual(p2sh_script_pubkey.address(testnet=True), address_2)
-
-class RedeemScript(Script):
-    '''Subclass that represents a RedeemScript for p2sh'''
-
-    def hash160(self):
-        '''Returns the hash160 of the serialization of the RedeemScript'''
-        return hash160(self.raw_serialize())
-
-    def script_pubkey(self):
-        '''Returns the ScriptPubKey that this RedeemScript corresponds to'''
-        return P2SHScriptPubKey(self.hash160())
-    
-    def address(self, testnet=False):
-        '''Returns the p2sh address for this RedeemScript'''
-        return self.script_pubkey().address(testnet)
-
-
-class RedeemScriptTest(TestCase):
-
-    def test_redeem_script(self):
-        hex_redeem_script = '4752210223136797cb0d7596cb5bd476102fe3aface2a06338e1afabffacf8c3cab4883c210385c865e61e275ba6fda4a3167180fc5a6b607150ff18797ee44737cd0d34507b52ae'
-        stream = BytesIO(bytes.fromhex(hex_redeem_script))
-        redeem_script = RedeemScript.parse(stream)
-        want = '36b865d5b9664193ea1db43d159edf9edf943802'
-        self.assertEqual(redeem_script.hash160().hex(), want)
-        want = '17a91436b865d5b9664193ea1db43d159edf9edf94380287'
-        self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
-        want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
-        self.assertEqual(redeem_script.address(testnet=True), want)
-
-
-class RedeemScriptTest(TestCase):
-
-    def test_redeem_script(self):
-        hex_redeem_script = '4752210223136797cb0d7596cb5bd476102fe3aface2a06338e1afabffacf8c3cab4883c210385c865e61e275ba6fda4a3167180fc5a6b607150ff18797ee44737cd0d34507b52ae'
-        stream = BytesIO(bytes.fromhex(hex_redeem_script))
-        redeem_script = RedeemScript.parse(stream)
-        want = '36b865d5b9664193ea1db43d159edf9edf943802'
-        self.assertEqual(redeem_script.hash160().hex(), want)
-        want = '17a91436b865d5b9664193ea1db43d159edf9edf94380287'
-        self.assertEqual(redeem_script.script_pubkey().serialize().hex(), want)
-        want = '2MxEZNps15dAnGX5XaVwZWgoDvjvsDE5XSx'
-        self.assertEqual(redeem_script.address(testnet=True), want)
-
-
 class WitnessScript(Script):
-    '''Subclass that represents a RedeemScript for p2wsh'''
+    '''Subclass that represents a WitnessScript for p2wsh'''
+
+    @classmethod
+    def convert(cls, raw_witness_script):
+        stream = BytesIO(encode_varstr(raw_witness_script))
+        return cls.parse(stream)
 
     def script_pubkey(self):
         '''Generates the ScriptPubKey for p2wsh'''
@@ -451,12 +437,12 @@ class WitnessScriptTest(TestCase):
 
     def test_address(self):
         witness_script_hex = '52210375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c2103a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff2103c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f88053ae'
-        witness_script = WitnessScript.parse(BytesIO(encode_varstr(bytes.fromhex(witness_script_hex))))
+        witness_script = WitnessScript.convert(bytes.fromhex(witness_script_hex))
         want = 'bc1qwqdg6squsna38e46795at95yu9atm8azzmyvckulcc7kytlcckxswvvzej'
         self.assertEqual(witness_script.address(), want)
 
     def test_p2sh_address(self):
         witness_script_hex = '5221026ccfb8061f235cc110697c0bfb3afb99d82c886672f6b9b5393b25a434c0cbf32103befa190c0c22e2f53720b1be9476dcf11917da4665c44c9c71c3a2d28a933c352102be46dc245f58085743b1cc37c82f0d63a960efa43b5336534275fc469b49f4ac53ae'
-        witness_script = WitnessScript.parse(BytesIO(encode_varstr(bytes.fromhex(witness_script_hex))))
+        witness_script = WitnessScript.convert(bytes.fromhex(witness_script_hex))
         want = '2MvVx9ccWqyYVNa5Xz9pfCEVk99zVBZh9ms'
         self.assertEqual(witness_script.p2sh_address(testnet=True), want)

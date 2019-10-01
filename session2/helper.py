@@ -34,6 +34,7 @@ def byte_to_int(b):
     '''Returns an integer that corresponds to the byte'''
     return b[0]
 
+
 def int_to_byte(n):
     '''Returns a single byte that corresponds to the integer'''
     if n > 255 or n < 0:
@@ -275,28 +276,6 @@ def encode_varstr(b):
     return result
 
 
-def h160_to_p2pkh_address(h160, testnet=False):
-    '''Takes a byte sequence hash160 and returns a p2pkh address string'''
-    # p2pkh has a prefix of b'\x00' for mainnet, b'\x6f' for testnet
-    if testnet:
-        prefix = b'\x6f'
-    else:
-        prefix = b'\x00'
-    # return the encode_base58_checksum the prefix and h160
-    return encode_base58_checksum(prefix + h160)
-
-
-def h160_to_p2sh_address(h160, testnet=False):
-    '''Takes a byte sequence hash160 and returns a p2sh address string'''
-    # p2sh has a prefix of b'\x05' for mainnet, b'\xc4' for testnet
-    if testnet:
-        prefix = b'\xc4'
-    else:
-        prefix = b'\x05'
-    # return the encode_base58_checksum the prefix and h160
-    return encode_base58_checksum(prefix + h160)
-
-
 def merkle_parent(hash1, hash2):
     '''Takes the binary hashes and calculates the hash256'''
     # return the hash256 of hash1 + hash2
@@ -454,26 +433,11 @@ class HelperTest(TestCase):
         self.assertEqual(h160, want)
         got = encode_base58_checksum(b'\x00' + bytes.fromhex(h160))
         self.assertEqual(got, addr)
-                
 
     def test_encode_base58_checksum(self):
         raw = bytes.fromhex('005dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69')
         want = '19ZewH8Kk1PDbSNdJ97FP4EiCjTRaZMZQA'
         self.assertEqual(encode_base58_checksum(raw), want)
-        
-    def test_p2pkh_address(self):
-        h160 = bytes.fromhex('74d691da1574e6b3c192ecfb52cc8984ee7b6c56')
-        want = '1BenRpVUFK65JFWcQSuHnJKzc4M8ZP8Eqa'
-        self.assertEqual(h160_to_p2pkh_address(h160, testnet=False), want)
-        want = 'mrAjisaT4LXL5MzE81sfcDYKU3wqWSvf9q'
-        self.assertEqual(h160_to_p2pkh_address(h160, testnet=True), want)
-
-    def test_p2sh_address(self):
-        h160 = bytes.fromhex('74d691da1574e6b3c192ecfb52cc8984ee7b6c56')
-        want = '3CLoMMyuoDQTPRD3XYZtCvgvkadrAdvdXh'
-        self.assertEqual(h160_to_p2sh_address(h160, testnet=False), want)
-        want = '2N3u1R6uwQfuobCqbCgBkpsgBxvr1tZpe7B'
-        self.assertEqual(h160_to_p2sh_address(h160, testnet=True), want)
 
     def test_bech32(self):
         tests = [

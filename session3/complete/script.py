@@ -393,6 +393,11 @@ class RedeemScript(Script):
         '''Returns the p2sh address for this RedeemScript'''
         return self.script_pubkey().address(testnet)
 
+    @classmethod
+    def convert(cls, raw_redeem_script):
+        stream = BytesIO(encode_varstr(raw_redeem_script))
+        return cls.parse(stream)
+
 
 class RedeemScriptTest(TestCase):
 
