@@ -7,11 +7,10 @@ import hashlib
 
 from helper import (
     big_endian_to_int,
+    decode_bech32,
     encode_base58_checksum,
     encode_bech32_checksum,
     encode_varstr,
-    h160_to_p2pkh_address,
-    h160_to_p2sh_address,
     hash160,
     hash256,
     int_to_big_endian,
@@ -455,11 +454,12 @@ class S256Point(Point):
         sec = self.sec(compressed)
         # hash160 the sec
         return hash160(sec)
-        
+
     def address(self, compressed=True, testnet=False):
         '''Returns the p2pkh address string'''
         h160 = self.hash160(compressed)
-        return h160_to_p2pkh_address(h160, testnet)
+        from script import P2PKHScriptPubKey
+        return P2PKHScriptPubKey(h160).address(testnet)
 
     def bech32_address(self, testnet=False):
         '''Returns the p2wpkh bech32 address string'''
@@ -628,6 +628,7 @@ class S256Test(TestCase):
             point = secret * G
             self.assertEqual(
                 point.bech32_address(testnet=False), mainnet_bech32)
+            self.assertEqual(decode_bech32(mainnet_bech32)[2], point.hash160())
             self.assertEqual(
                 point.bech32_address(testnet=True), testnet_bech32)
 

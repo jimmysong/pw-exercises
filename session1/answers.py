@@ -152,19 +152,20 @@ True
 
 #endexercise
 #unittest
-tx:TxTest:test_verify_p2sh_p2wpkh:
+tx:TxTest:test_verify_p2wpkh:
 #endunittest
 #code
 >>> # Example of generating a p2sh-p2wpkh address
 >>> from ecc import S256Point
->>> from helper import encode_base58_checksum, hash160, h160_to_p2sh_address
->>> from script import P2WPKHScriptPubKey
+>>> from helper import encode_base58_checksum, hash160
+>>> from script import P2WPKHScriptPubKey, P2SHScriptPubKey
 >>> sec_hex = '02c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d'
 >>> point = S256Point.parse(bytes.fromhex(sec_hex))
 >>> h160 = point.hash160()
 >>> redeem_script = P2WPKHScriptPubKey(h160)
->>> h160_p2sh = hash160(redeem_script.raw_serialize())
->>> address = h160_to_p2sh_address(h160_p2sh, testnet=False)
+>>> p2sh_h160 = hash160(redeem_script.raw_serialize())
+>>> p2sh_script_pubkey = P2SHScriptPubKey(p2sh_h160)
+>>> address = p2sh_script_pubkey.address(testnet=False)
 >>> print(address)
 3CobPD6RBnTZsFdka71XHQr4vHXDZMu2zm
 
@@ -174,8 +175,8 @@ tx:TxTest:test_verify_p2sh_p2wpkh:
 
 ---
 >>> from ecc import PrivateKey
->>> from helper import encode_varstr, h160_to_p2sh_address, hash160, hash256, little_endian_to_int
->>> from script import P2WPKHScriptPubKey
+>>> from helper import encode_varstr, hash160, hash256, little_endian_to_int
+>>> from script import P2WPKHScriptPubKey, P2SHScriptPubKey
 >>> # use the same passphrase from session 0
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
 >>> secret = little_endian_to_int(hash256(passphrase))
@@ -189,15 +190,17 @@ tx:TxTest:test_verify_p2sh_p2wpkh:
 >>> redeem_script = P2WPKHScriptPubKey(h160)  #/
 >>> # perform a hash160 on the raw serialization of the RedeemScript
 >>> p2sh_h160 = hash160(redeem_script.raw_serialize())  #/
->>> # encode to base58 using h160_to_p2sh_address, remember testnet=True
->>> address = h160_to_p2sh_address(p2sh_h160, testnet=True)  #/
+>>> # create a P2SHScriptPubKey using the h160
+>>> p2sh_script = P2SHScriptPubKey(p2sh_h160)  #/
+>>> # return the address, remember testnet=True
+>>> address = p2sh_script.address(testnet=True)  #/
 >>> # print the address
 >>> print(address)  #/
 2N4MoSx2SoExv53GJFEdPuMqL8djPQPH2er
 
 #endexercise
 #unittest
-script:ScriptTest:test_p2sh_address:
+script:TestP2SHScriptPubKey:test_address:
 #endunittest
 #unittest
 ecc:S256Test:test_p2sh_p2wpkh_address:
@@ -304,23 +307,48 @@ True
 >>> print(tx_obj.serialize().hex())  #/
 010000000001016d6acf71572b3ad5f5a0a7581035878f5c73ee63a5a8604e2a67793c256e3e9b0000000017160014401af0b57c7a4b7490c508a47d0747d03cf6ac2effffffff02c0c62d00000000001600146e13971913b9aa89659a9f53d327baa8826f2d758c821e000000000017a91479e7cf6859a7047b099a078a8ffbbb58b73b8633870247304402205e35a2329e08e949d16189b213586feee2df37a48f961808372bbee44fcbc59402207a66acbd49f1366ff8e5a718d9f4d33867fe4c595b4834822fb6b33e7e99ab98012102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d00000000
 
+#endexercise
 '''
 
 
 from unittest import TestCase
 
+from ecc import S256Point
 from helper import (
+    encode_bech32_checksum,
     encode_varint,
     encode_varstr,
     hash256,
+    int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
     read_varint,
     read_varstr,
     SIGHASH_ALL,
 )
-from script import P2PKHScriptPubKey
+from script import P2PKHScriptPubKey, SegwitPubKey, Script
 from tx import Tx, TxIn, TxOut
+
+
+def bech32_address(self, testnet=False):
+    raw = b'\x00'
+    raw += encode_varstr(self.hash160())
+    return encode_bech32_checksum(raw, testnet)
+
+
+def p2sh_p2wpkh_redeem_script(self):
+    from script import P2WPKHScriptPubKey
+    return P2WPKHScriptPubKey(self.hash160()).redeem_script()
+
+
+def p2sh_p2wpkh_address(self, testnet=False):
+    redeem_script = self.p2sh_p2wpkh_redeem_script()
+    return redeem_script.address(testnet)
+
+
+def p2sh_address(self, testnet=False):
+    # get the RedeemScript equivalent and get its address
+    return self.redeem_script().address(testnet)
 
 
 @classmethod
@@ -384,9 +412,36 @@ def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
     return int.from_bytes(hash256(s), 'big')
 
 
+def sign_p2wpkh(self, input_index, private_key):
+    z = self.sig_hash_bip143(input_index)
+    der = private_key.sign(z).der()
+    sig = der + int_to_byte(SIGHASH_ALL)
+    sec = private_key.point.sec()
+    self.tx_ins[input_index].witness = [sig, sec]
+    return self.verify_input(input_index)
+
+
+def sign_p2sh_p2wpkh(self, input_index, private_key):
+    tx_in = self.tx_ins[input_index]
+    redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
+    tx_in.script_sig = Script([redeem_script.raw_serialize()])
+    z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
+    der = private_key.sign(z).der()
+    sig = der + int_to_byte(SIGHASH_ALL)
+    sec = private_key.point.sec()
+    tx_in.witness = [sig, sec]
+    return self.verify_input(input_index)
+
+
 class SessionTest(TestCase):
 
     def test_apply(self):
+        S256Point.bech32_address = bech32_address
+        S256Point.p2sh_p2wpkh_redeem_script = p2sh_p2wpkh_redeem_script
+        S256Point.p2sh_p2wpkh_address = p2sh_p2wpkh_address
+        SegwitPubKey.p2sh_address = p2sh_address
         Tx.parse_segwit = parse_segwit
         Tx.serialize_segwit = serialize_segwit
         Tx.sig_hash_bip143 = sig_hash_bip143
+        Tx.sign_p2wpkh = sign_p2wpkh
+        Tx.sign_p2sh_p2wpkh = sign_p2sh_p2wpkh

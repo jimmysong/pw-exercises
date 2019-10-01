@@ -11,7 +11,6 @@ from helper import (
     hash256,
     encode_varint,
     encode_varstr,
-    int_to_big_endian,
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
@@ -21,7 +20,6 @@ from helper import (
 )
 from script import (
     P2PKHScriptPubKey,
-    P2SHScriptPubKey,
     P2WPKHScriptPubKey,
     RedeemScript,
     Script,
@@ -153,41 +151,22 @@ class Tx:
         '''Takes a byte stream and parses a segwit transaction'''
         # s.read(n) will return n bytes
         # version has 4 bytes, little-endian, interpret as int
-        version = little_endian_to_int(s.read(4))
         # next two bytes need to be 0x00 and 0x01, otherwise raise RuntimeError
-        marker = s.read(2)
-        if marker != b'\x00\x01':
-            raise RuntimeError('Not a segwit transaction {}'.format(marker))
         # num_inputs is a varint, use read_varint(s)
-        num_inputs = read_varint(s)
         # each input needs parsing, create inputs array
-        inputs = []
         # parse each input and add to the inputs array
-        for _ in range(num_inputs):
-            inputs.append(TxIn.parse(s))
         # num_outputs is a varint, use read_varint(s)
-        num_outputs = read_varint(s)
         # each output needs parsing, create outputs array
-        outputs = []
         # parse each output and add to the outputs array
-        for _ in range(num_outputs):
-            outputs.append(TxOut.parse(s))
         # there is a witness for each input
-        for tx_in in inputs:
             # read the number of items for each input using read_varint
-            num_items = read_varint(s)
             # create the witness array as the witness property of tx_in
-            tx_in.witness = []
             # iterate through the number of items
-            for _ in range(num_items):
                 # read the item using read_varstr
-                item = read_varstr(s)
                 # add the item to the witness array
-                tx_in.witness.append(item)
         # locktime is 4 bytes, little-endian
-        locktime = little_endian_to_int(s.read(4))
         # return an instance of the class (cls(...))
-        return cls(version, inputs, outputs, locktime, testnet=testnet, segwit=True)
+        raise NotImplementedError
 
     def serialize(self):
         if self.segwit:
@@ -218,32 +197,19 @@ class Tx:
     def serialize_segwit(self):
         '''Returns the byte serialization of the transaction'''
         # serialize version (4 bytes, little endian)
-        result = int_to_little_endian(self.version, 4)
         # segwit marker b'\x00\x01'
-        result += b'\x00\x01'
         # encode_varint on the number of inputs
-        result += encode_varint(len(self.tx_ins))
         # iterate inputs
-        for tx_in in self.tx_ins:
             # serialize each input
-            result += tx_in.serialize()
         # encode_varint on the number of inputs
-        result += encode_varint(len(self.tx_outs))
         # iterate outputs
-        for tx_out in self.tx_outs:
             # serialize each output
-            result += tx_out.serialize()
         # add the witness data for each input
-        for tx_in in self.tx_ins:
             # encode the number of items in the witness in little-endian
-            result += int_to_byte(len(tx_in.witness))
             # iterate through the items in the witness field
-            for item in tx_in.witness:
                 # use encode_varstr to encode the item
-                result += encode_varstr(item)
         # serialize locktime (4 bytes, little endian)
-        result += int_to_little_endian(self.locktime, 4)
-        return result
+        raise NotImplementedError
 
     def fee(self):
         '''Returns the fee of this transaction in satoshi'''
@@ -333,38 +299,22 @@ class Tx:
         '''Returns the integer representation of the hash that needs to get
         signed for index input_index'''
         # grab the input being signed by looking up the input_index
-        tx_in = self.tx_ins[input_index]
         # start with the version in 4 bytes, little endian
-        s = int_to_little_endian(self.version, 4)
         # add the HashPrevouts and HashSequence
-        s += self.hash_prevouts() + self.hash_sequence()
         # add the previous transaction hash in little endian
-        s += tx_in.prev_tx[::-1]
         # add the previous transaction index in 4 bytes, little endian
-        s += int_to_little_endian(tx_in.prev_index, 4)
         # for p2wpkh, we need the previous script pubkey
         # Exercise 8: for p2sh-p2wpkh, it's the second command of the redeem script
-        if redeem_script:
-            h160 = redeem_script.commands[1]
-        else:
             # get the script pubkey associated with the previous output (remember testnet)
-            script_pubkey = tx_in.script_pubkey(self.testnet)
             # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
-            h160 = script_pubkey.commands[1]
         # turn the hash160 into the serialized p2pkh script and add it
-        s += P2PKHScriptPubKey(h160).serialize()
         # add the value of the input in 8 bytes, little endian
-        s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
         # add the sequence of the input in 4 bytes, little endian
-        s += int_to_little_endian(tx_in.sequence, 4)
         # add the HashOutputs
-        s += self.hash_outputs()
         # add the locktime in 4 bytes, little endian
-        s += int_to_little_endian(self.locktime, 4)
         # add the sighash (SIGHASH_ALL) in 4 bytes, little endian
-        s += int_to_little_endian(SIGHASH_ALL, 4)
         # hash256 the whole thing, interpret the as a big endian integer using int_to_big_endian
-        return big_endian_to_int(hash256(s))
+        raise NotImplementedError
 
     def verify_input(self, input_index):
         '''Returns whether the input has a valid signature'''
@@ -373,11 +323,11 @@ class Tx:
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
-        if isinstance(script_pubkey, P2SHScriptPubKey):
+        if script_pubkey.is_p2sh():
             # the last command has to be the redeem script to trigger
             command = tx_in.script_sig.commands[-1]
             # parse the redeem script
-            redeem_script = Script.parse(BytesIO(encode_varstr(command)))
+            redeem_script = RedeemScript.parse(BytesIO(encode_varstr(command)))
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh():
                 z = self.sig_hash_bip143(input_index, redeem_script)
@@ -426,38 +376,25 @@ class Tx:
     def sign_p2wpkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
         # get the sig hash (z) using the bip143 serialization
-        z = self.sig_hash_bip143(input_index)
         # get der signature of z from private key
-        der = private_key.sign(z).der()
         # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
-        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
-        sec = private_key.point.sec()
         # change input's witness to be an array of signature and sec pub key
-        self.tx_ins[input_index].witness = [sig, sec]
         # return whether sig is valid using self.verify_input
-        return self.verify_input(input_index)
+        raise NotImplementedError
 
     def sign_p2sh_p2wpkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
         # grab the input
-        tx_in = self.tx_ins[input_index]
         # the RedeemScript can be computed from the public key
-        redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
         # set the tx_in ScriptSig with the raw-serialization RedeemScript as the only command
-        tx_in.script_sig = Script([redeem_script.raw_serialize()])
         # get the sig hash (z) using the bip143 serialization, pass in the RedeemScript
-        z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
         # get der signature of z from private key
-        der = private_key.sign(z).der()
         # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
-        sig = der + int_to_byte(SIGHASH_ALL)
         # calculate the sec
-        sec = private_key.point.sec()
         # change input's witness to be an array of signature and sec pub key
-        tx_in.witness = [sig, sec]
         # return whether sig is valid using self.verify_input
-        return self.verify_input(input_index)
+        raise NotImplementedError
 
     def sign_input(self, input_index, private_key, redeem_script=None):
         '''Signs the input by figuring out what type of ScriptPubKey the previous output was'''

@@ -5,11 +5,10 @@ from helper import (
     byte_to_int,
     decode_base58,
     encode_base58_checksum,
-    encode_varint,
+    encode_varstr,
     hash160,
     int_to_byte,
     read_varint,
-    sha256,
 )
 from op import (
     op_equal,
@@ -120,10 +119,8 @@ class Script:
     def serialize(self):
         # get the raw serialization (no prepended length)
         result = self.raw_serialize()
-        # get the length of the whole thing
-        total = len(result)
-        # encode_varint the total length of the result and prepend
-        return encode_varint(total) + result
+        # encode_varstr the result
+        return encode_varstr(result)
 
     def evaluate(self, z):
         # create a copy as we may need to add to this list if we have a
@@ -165,7 +162,7 @@ class Script:
                 if len(commands) == 3 and commands[0] == 0xa9 \
                     and type(commands[1]) == bytes and len(commands[1]) == 20 \
                     and commands[2] == 0x87:
-                    redeem_script = encode_varint(len(command)) + command
+                    redeem_script = encode_varstr(command)
                     # we execute the next three op codes
                     commands.pop()
                     h160 = commands.pop()
@@ -240,7 +237,7 @@ class ScriptPubKey(Script):
             return script_pubkey
 
 
-class P2PKHScriptPubKey(Script):
+class P2PKHScriptPubKey(ScriptPubKey):
 
     def __init__(self, h160):
         if type(h160) != bytes:
@@ -270,7 +267,7 @@ class TestP2PKHScriptPubKey(TestCase):
         self.assertEqual(p2pkh_script_pubkey.address(testnet=True), address_2)
 
 
-class P2SHScriptPubKey(Script):
+class P2SHScriptPubKey(ScriptPubKey):
 
     def __init__(self, h160):
         if type(h160) != bytes:
@@ -310,7 +307,7 @@ class RedeemScript(Script):
     def script_pubkey(self):
         '''Returns the ScriptPubKey that this RedeemScript corresponds to'''
         return P2SHScriptPubKey(self.hash160())
-    
+
     def address(self, testnet=False):
         '''Returns the p2sh address for this RedeemScript'''
         return self.script_pubkey().address(testnet)

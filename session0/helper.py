@@ -32,6 +32,7 @@ def byte_to_int(b):
     '''Returns an integer that corresponds to the byte'''
     return b[0]
 
+
 def int_to_byte(n):
     '''Returns a single byte that corresponds to the integer'''
     if n > 255 or n < 0:
@@ -173,11 +174,9 @@ def read_varstr(s):
 def encode_varstr(b):
     '''encodes bytes as a varstr'''
     # encode the length of the string using encode_varint
-    result = encode_varint(len(b))
     # add the bytes
-    result += b
     # return the whole thing
-    return result
+    raise NotImplementedError
 
 
 def merkle_parent(hash1, hash2):
@@ -325,7 +324,6 @@ class HelperTest(TestCase):
         self.assertEqual(h160, want)
         got = encode_base58_checksum(b'\x00' + bytes.fromhex(h160))
         self.assertEqual(got, addr)
-                
 
     def test_encode_base58_checksum(self):
         raw = bytes.fromhex('005dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69')

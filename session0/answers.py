@@ -1,6 +1,9 @@
+
 '''
 #code
 >>> import ecc, helper, tx
+>>> from tx import TxFetcher
+>>> TxFetcher.load_cache('tx.cache')
 
 #endcode
 #markdown
@@ -187,7 +190,7 @@ def sign_input(self, input_index, private_key):
         raise RuntimeError('Unknown ScriptPubKey')
 
 
-class Session0Test(TestCase):
+class SessionTest(TestCase):
 
     def test_apply(self):
         helper.read_varstr = read_varstr

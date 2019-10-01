@@ -446,19 +446,17 @@ class S256Point(Point):
             y = int_to_big_endian(self.y.num, 32)
             return b'\x04' + x + y
 
-    def address(self, compressed=True, testnet=False):
-        '''Returns the address string'''
+    def hash160(self, compressed=True):
         # get the sec
         sec = self.sec(compressed)
         # hash160 the sec
-        h160 = hash160(sec)
-        # raw is hash 160 prepended w/ b'\x00' for mainnet, b'\x6f' for testnet
-        if testnet:
-            prefix = b'\x6f'
-        else:
-            prefix = b'\x00'
-        # return the encode_base58_checksum of the prefix and h160
-        return encode_base58_checksum(prefix + h160)
+        return hash160(sec)
+
+    def address(self, compressed=True, testnet=False):
+        '''Returns the p2pkh address string'''
+        h160 = self.hash160(compressed)
+        from script import P2PKHScriptPubKey
+        return P2PKHScriptPubKey(h160).address(testnet)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking
@@ -476,11 +474,9 @@ class S256Point(Point):
         '''Verify a message in the form of bytes. Assumes that the z
         is calculated using hash256 interpreted as a big-endian integer'''
         # calculate the hash256 of the message
-        h256 = hash256(message)
         # z is the big-endian interpretation. use big_endian_to_int
-        z = big_endian_to_int(h256)
         # verify the message using the self.verify method
-        return self.verify(z, sig)
+        raise NotImplementedError
 
     @classmethod
     def parse(self, sec_bin):
@@ -557,30 +553,29 @@ class S256Test(TestCase):
         self.assertEqual(point.sec(compressed=True), bytes.fromhex(compressed))
 
     def test_address(self):
-        secret = 888**3
-        mainnet_address = '148dY81A9BmdpMhvYEVznrM45kWN32vSCN'
-        testnet_address = 'mieaqB68xDCtbUBYFoUNcmZNwk74xcBfTP'
-        point = secret * G
-        self.assertEqual(
-            point.address(compressed=True, testnet=False), mainnet_address)
-        self.assertEqual(
-            point.address(compressed=True, testnet=True), testnet_address)
-        secret = 321
-        mainnet_address = '1S6g2xBJSED7Qr9CYZib5f4PYVhHZiVfj'
-        testnet_address = 'mfx3y63A7TfTtXKkv7Y6QzsPFY6QCBCXiP'
-        point = secret * G
-        self.assertEqual(
-            point.address(compressed=False, testnet=False), mainnet_address)
-        self.assertEqual(
-            point.address(compressed=False, testnet=True), testnet_address)
-        secret = 4242424242
-        mainnet_address = '1226JSptcStqn4Yq9aAmNXdwdc2ixuH9nb'
-        testnet_address = 'mgY3bVusRUL6ZB2Ss999CSrGVbdRwVpM8s'
-        point = secret * G
-        self.assertEqual(
-            point.address(compressed=False, testnet=False), mainnet_address)
-        self.assertEqual(
-            point.address(compressed=False, testnet=True), testnet_address)
+        tests = (
+            (
+                888**3,
+                '148dY81A9BmdpMhvYEVznrM45kWN32vSCN',
+                'mnabU9NCcRE5zcNZ2C16CnvKPELrFvisn3',
+            ),
+            (
+                321,
+                '1FNgueDbMYjNQ8HT77sHKxTwdrHMdTGwyN',
+                'mfx3y63A7TfTtXKkv7Y6QzsPFY6QCBCXiP',
+            ),
+            (
+                4242424242,
+                '1HUYfVCXEmp76uh17bE2gA72Vuqv4wrM1a',
+                'mgY3bVusRUL6ZB2Ss999CSrGVbdRwVpM8s',
+            ),
+        )
+        for secret, mainnet_legacy, testnet_legacy in tests:
+            point = secret * G
+            self.assertEqual(
+                point.address(testnet=False), mainnet_legacy)
+            self.assertEqual(
+                point.address(compressed=False, testnet=True), testnet_legacy)
 
     def test_verify(self):
         point = S256Point(
@@ -714,11 +709,9 @@ class PrivateKey:
         be assumed to be the hash256 of the message interpreted as a big-endian
         integer.'''
         # compute the hash256 of the message
-        h256 = hash256(message)
         # z is the big-endian interpretation. use big_endian_to_int
-        z = big_endian_to_int(h256)
         # sign the message using the self.sign method
-        return self.sign(z)
+        raise NotImplementedError
 
     def wif(self, compressed=True, testnet=False):
         # convert the secret from integer to a 32-bytes in big endian using int_to_big_endian(x, 32)

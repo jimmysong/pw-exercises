@@ -10,3 +10,4 @@ share/
 *.orig
 *.rej
 *.patch
+*.coverage

@@ -11,7 +11,6 @@ from helper import (
     hash256,
     encode_varint,
     encode_varstr,
-    int_to_big_endian,
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
@@ -21,7 +20,6 @@ from helper import (
 )
 from script import (
     P2PKHScriptPubKey,
-    P2SHScriptPubKey,
     P2WPKHScriptPubKey,
     RedeemScript,
     Script,
@@ -373,11 +371,11 @@ class Tx:
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
         # check to see if the script_pubkey is a p2sh
-        if isinstance(script_pubkey, P2SHScriptPubKey):
+        if script_pubkey.is_p2sh():
             # the last command has to be the redeem script to trigger
             command = tx_in.script_sig.commands[-1]
             # parse the redeem script
-            redeem_script = Script.parse(BytesIO(encode_varstr(command)))
+            redeem_script = RedeemScript.parse(BytesIO(encode_varstr(command)))
             # the redeem script might be a segwit pubkey
             if redeem_script.is_p2wpkh():
                 z = self.sig_hash_bip143(input_index, redeem_script)
