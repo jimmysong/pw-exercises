@@ -9,6 +9,7 @@ from helper import (
     encode_varstr,
     hash160,
     int_to_byte,
+    int_to_little_endian,
     read_varint,
     sha256,
 )
@@ -107,12 +108,12 @@ class Script:
                     result += int_to_byte(length)
                 elif length > 75 and length < 0x100:
                     # 76 is pushdata1
-                    result += int_to_byte(76, 1)
-                    result += int_to_byte(length, 1)
+                    result += int_to_byte(76)
+                    result += int_to_byte(length)
                 elif length >= 0x100 and length <= 520:
                     # 77 is pushdata2
-                    result += int_to_byte(77, 1)
-                    result += int_to_byte(length, 2)
+                    result += int_to_byte(77)
+                    result += int_to_little_endian(length, 2)
                 else:
                     raise ValueError('too long a command')
                 result += command
@@ -186,15 +187,15 @@ class Script:
                 if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 20:
                     h160 = stack.pop()
                     stack.pop()
-                    commands.extend(witness)
+                    commands.extend(witness.items)
                     commands.extend(P2PKHScriptPubKey(h160).commands)
                 # witness program version 0 rule. if stack commands are:
                 # 0 <32 byte hash> this is p2wsh
                 if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 32:
                     s256 = stack.pop()
                     stack.pop()
-                    commands.extend(witness[:-1])
-                    witness_script = witness[-1]
+                    commands.extend(witness.items[:-1])
+                    witness_script = witness.items[-1]
                     if s256 != sha256(witness_script):
                         print('bad sha256 {} vs {}'.format(s256.hex(), sha256(witness_script).hex()))
                         return False
@@ -399,7 +400,7 @@ class P2WSHScriptPubKey(SegwitPubKey):
 
     def __init__(self, s256):
         if type(s256) != bytes:
-            raise TypeError('To initialize P2WSHScriptPubKey, a hassha256 is needed')
+            raise TypeError('To initialize P2WSHScriptPubKey, a sha256 is needed')
         self.commands = [0x00, s256]
 
 
@@ -411,10 +412,14 @@ class WitnessScript(Script):
         stream = BytesIO(encode_varstr(raw_witness_script))
         return cls.parse(stream)
 
+    def sha256(self):
+        '''Returns the sha256 of the raw serialization for witness program'''
+        return sha256(self.raw_serialize())
+
     def script_pubkey(self):
         '''Generates the ScriptPubKey for p2wsh'''
-        # get the sha256 of the current script's raw serialization
-        s256 = sha256(self.raw_serialize())
+        # get the sha256 of the current script
+        s256 = self.sha256()
         # return new p2wsh script using p2wsh_script
         return P2WSHScriptPubKey(s256)
 

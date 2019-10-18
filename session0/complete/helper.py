@@ -133,7 +133,10 @@ def decode_base58(s):
 
 def read_varint(s):
     '''reads a variable integer from a stream'''
-    i = s.read(1)[0]
+    b = s.read(1)
+    if len(b) != 1:
+        raise IOError('stream has no bytes')
+    i = b[0]
     if i == 0xfd:
         # 0xfd means the next two bytes are the number
         return little_endian_to_int(s.read(2))
@@ -287,6 +290,28 @@ def murmur3(data, seed=0):
     h1 *= 0xc2b2ae35
     h1 ^= ((h1 & 0xffffffff) >> 16)
     return h1 & 0xffffffff
+
+
+def number_to_op_code_byte(n):
+    '''Returns the OP code for a particular number'''
+    if n < -1 or n > 16:
+        raise ValueError('Not a valid OP code')
+    if n > 0:
+        return bytes([0x50 + n])
+    elif n == 0:
+        return b'\x00'
+    elif n == -1:
+        return b'\x4f'
+
+
+def op_code_to_number(op_code):
+    '''Returns the n for a particular OP code'''
+    if op_code not in (0, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96):
+        raise ValueError('Not a valid OP code')
+    if op_code == 0:
+        return 0
+    else:
+        return op_code - 80
 
 
 class HelperTest(TestCase):

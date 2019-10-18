@@ -62,6 +62,7 @@ ecc:S256Test:test_bech32_address:
 >>> from ecc import PrivateKey
 >>> from helper import hash256, little_endian_to_int, SIGHASH_ALL
 >>> from tx import Tx
+>>> from witness import Witness
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> raw_tx_hex = '01000000000101cca99b60e1d687e8faaf93e114114e7b5f6382d9f5d45ffb76ac7472ad7d734c0100000000ffffffff014c400f0000000000160014092ab91b37b4182061d9c01199aaac029f89561f0000000000'
 >>> input_index = 0
@@ -72,7 +73,7 @@ ecc:S256Test:test_bech32_address:
 >>> sig = der + SIGHASH_ALL.to_bytes(1, 'big')
 >>> sec = private_key.point.sec()
 >>> tx_in = tx_obj.tx_ins[input_index]
->>> tx_in.witness = [sig, sec]
+>>> tx_in.witness = Witness([sig, sec])
 >>> print(tx_obj.verify_input(input_index))
 True
 
@@ -212,6 +213,7 @@ ecc:S256Test:test_p2sh_p2wpkh_address:
 >>> from helper import hash256, little_endian_to_int, SIGHASH_ALL
 >>> from script import Script
 >>> from tx import Tx
+>>> from witness import Witness
 >>> private_key = PrivateKey(little_endian_to_int(hash256(b'jimmy@programmingblockchain.com Jimmy Song')))
 >>> redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
 >>> raw_tx_hex = '010000000001014e6b786f3cd70ab1ffd75caa6bb252c9888fdca9ca94d40fec24bec3e643d89e0000000000ffffffff014c400f0000000000160014401af0b57c7a4b7490c508a47d0747d03cf6ac2e0000000000'
@@ -223,7 +225,7 @@ ecc:S256Test:test_p2sh_p2wpkh_address:
 >>> sig = der + SIGHASH_ALL.to_bytes(1, 'big')
 >>> sec = private_key.point.sec()
 >>> tx_in = tx_obj.tx_ins[input_index]
->>> tx_in.witness = [sig, sec]
+>>> tx_in.witness = Witness([sig, sec])
 >>> tx_in.script_sig = Script([redeem_script.raw_serialize()])
 >>> print(tx_obj.verify_input(input_index))
 True
@@ -328,6 +330,7 @@ from helper import (
 )
 from script import P2PKHScriptPubKey, SegwitPubKey, Script
 from tx import Tx, TxIn, TxOut
+from witness import Witness
 
 
 def bech32_address(self, testnet=False):
@@ -366,11 +369,7 @@ def parse_segwit(cls, s, testnet=False):
     for _ in range(num_outputs):
         outputs.append(TxOut.parse(s))
     for tx_in in inputs:
-        num_items = read_varint(s)
-        tx_in.witness = []
-        for _ in range(num_items):
-            item = read_varstr(s)
-            tx_in.witness.append(item)
+        tx_in.witness = Witness.parse(s)
     locktime = little_endian_to_int(s.read(4))
     return cls(version, inputs, outputs, locktime, testnet=testnet, segwit=True)
 
@@ -385,9 +384,7 @@ def serialize_segwit(self):
     for tx_out in self.tx_outs:
         result += tx_out.serialize()
     for tx_in in self.tx_ins:
-        result += int_to_little_endian(len(tx_in.witness), 1)
-        for item in tx_in.witness:
-            result += encode_varstr(item)
+        result += tx_in.witness.serialize()
     result += int_to_little_endian(self.locktime, 4)
     return result
 
@@ -400,10 +397,12 @@ def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
     s += int_to_little_endian(tx_in.prev_index, 4)
     if redeem_script:
         h160 = redeem_script.commands[1]
+        script_code = P2PKHScriptPubKey(h160)
     else:
         script_pubkey = tx_in.script_pubkey(self.testnet)
         h160 = script_pubkey.commands[1]
-    s += P2PKHScriptPubKey(h160).serialize()
+        script_code = P2PKHScriptPubKey(h160)
+    s += script_code.serialize()
     s += int_to_little_endian(tx_in.value(testnet=self.testnet), 8)
     s += int_to_little_endian(tx_in.sequence, 4)
     s += self.hash_outputs()
@@ -413,24 +412,37 @@ def sig_hash_bip143(self, input_index, redeem_script=None, witness_script=None):
 
 
 def sign_p2wpkh(self, input_index, private_key):
-    z = self.sig_hash_bip143(input_index)
-    der = private_key.sign(z).der()
-    sig = der + int_to_byte(SIGHASH_ALL)
+    sig = self.get_sig_segwit(input_index, private_key)
     sec = private_key.point.sec()
-    self.tx_ins[input_index].witness = [sig, sec]
+    self.tx_ins[input_index].finalize_p2wpkh(sig, sec)
     return self.verify_input(input_index)
 
 
 def sign_p2sh_p2wpkh(self, input_index, private_key):
-    tx_in = self.tx_ins[input_index]
     redeem_script = private_key.point.p2sh_p2wpkh_redeem_script()
-    tx_in.script_sig = Script([redeem_script.raw_serialize()])
-    z = self.sig_hash_bip143(input_index, redeem_script=redeem_script)
-    der = private_key.sign(z).der()
-    sig = der + int_to_byte(SIGHASH_ALL)
+    sig = self.get_sig_segwit(input_index, private_key, redeem_script=redeem_script)
     sec = private_key.point.sec()
-    tx_in.witness = [sig, sec]
+    self.tx_ins[input_index].finalize_p2wpkh(sig, sec, redeem_script)
     return self.verify_input(input_index)
+
+
+def get_sig_segwit(self, input_index, private_key, redeem_script=None, witness_script=None):
+    z = self.sig_hash_bip143(input_index, redeem_script, witness_script)
+    der = private_key.sign(z).der()
+    return der + int_to_byte(SIGHASH_ALL)
+
+
+def check_sig_segwit(self, input_index, point, signature, redeem_script=None, witness_script=None):
+    z = self.sig_hash_bip143(input_index, redeem_script, witness_script)
+    return point.verify(z, signature)
+
+
+def finalize_p2wpkh(self, sig, sec, redeem_script=None):
+    if redeem_script:
+        self.script_sig = Script([redeem_script.raw_serialize()])
+    else:
+        self.script_sig = Script()
+    self.witness = Witness([sig, sec])
 
 
 class SessionTest(TestCase):
@@ -440,8 +452,11 @@ class SessionTest(TestCase):
         S256Point.p2sh_p2wpkh_redeem_script = p2sh_p2wpkh_redeem_script
         S256Point.p2sh_p2wpkh_address = p2sh_p2wpkh_address
         SegwitPubKey.p2sh_address = p2sh_address
+        Tx.check_sig_segwit = check_sig_segwit
+        Tx.get_sig_segwit = get_sig_segwit
         Tx.parse_segwit = parse_segwit
         Tx.serialize_segwit = serialize_segwit
         Tx.sig_hash_bip143 = sig_hash_bip143
         Tx.sign_p2wpkh = sign_p2wpkh
         Tx.sign_p2sh_p2wpkh = sign_p2sh_p2wpkh
+        TxIn.finalize_p2wpkh = finalize_p2wpkh

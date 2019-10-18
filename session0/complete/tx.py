@@ -232,19 +232,20 @@ class Tx:
         tx_in = self.tx_ins[input_index]
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
-        # check to see if the script_pubkey is a p2sh
+        # grab the RedeemScript if we have a p2sh
         if script_pubkey.is_p2sh():
-            # the last command of the ScriptSig is the RedeemScript
+            # the last command of the ScriptSig is the raw RedeemScript
             raw_redeem_script = tx_in.script_sig.commands[-1]
             # convert to RedeemScript
             redeem_script = RedeemScript.convert(raw_redeem_script)
-            z = self.sig_hash(input_index, redeem_script)
         else:
-            z = self.sig_hash(input_index)
+            redeem_script = None
+        # calculate z
+        z = self.sig_hash(input_index, redeem_script)
         # combine the scripts
         combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
         # evaluate the combined script
-        return combined_script.evaluate(z)
+        return combined_script.evaluate(z, tx_in.witness)
 
     def verify(self):
         '''Verify this transaction'''
@@ -257,18 +258,12 @@ class Tx:
 
     def sign_p2pkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
-        # get the sig_hash (z)
-        z = self.sig_hash(input_index)
-        # get der signature of z from private key
-        der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
-        sig = der + int_to_byte(SIGHASH_ALL)
+        # get the sig using get_sig_legacy
+        sig = self.get_sig_legacy(input_index, private_key)
         # calculate the sec
         sec = private_key.point.sec()
-        # initialize a new script with [sig, sec] as the elements
-        script_sig = Script([sig, sec])
-        # change input's script_sig to new script
-        self.tx_ins[input_index].script_sig = script_sig
+        # finalize the input using finalize_p2pkh
+        self.tx_ins[input_index].finalize_p2pkh(sig, sec)
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
 
@@ -284,6 +279,20 @@ class Tx:
         # else return a RuntimeError
         else:
             raise RuntimeError('Unknown ScriptPubKey')
+
+    def get_sig_legacy(self, input_index, private_key, redeem_script=None):
+        # get the sig hash (z)
+        z = self.sig_hash(input_index, redeem_script=redeem_script)
+        # get der signature of z from private key
+        der = private_key.sign(z).der()
+        # append the SIGHASH_ALL with int_to_byte(SIGHASH_ALL)
+        return der + int_to_byte(SIGHASH_ALL)
+
+    def check_sig_legacy(self, input_index, point, signature, redeem_script=None):
+        # get the sig_hash (z)
+        z = self.sig_hash(input_index, redeem_script)
+        # return whether the signature verifies
+        return point.verify(z, signature)
 
     def is_coinbase(self):
         '''Returns whether this transaction is a coinbase transaction or not'''
@@ -334,6 +343,8 @@ class TxIn:
         else:
             self.script_sig = script_sig
         self.sequence = sequence
+        self._value = None
+        self._script_pubkey = None
 
     def __repr__(self):
         return '{}:{}'.format(
@@ -378,21 +389,28 @@ class TxIn:
         '''Get the outpoint value by looking up the tx hash
         Returns the amount in satoshi
         '''
-        # use self.fetch_tx to get the transaction
-        tx = self.fetch_tx(testnet=testnet)
-        # get the output at self.prev_index
-        # return the amount property
-        return tx.tx_outs[self.prev_index].amount
+        if self._value is None:
+            # use self.fetch_tx to get the transaction
+            tx = self.fetch_tx(testnet=testnet)
+            # get the output at self.prev_index
+            self._value = tx.tx_outs[self.prev_index].amount
+        return self._value
 
     def script_pubkey(self, testnet=False):
         '''Get the scriptPubKey by looking up the tx hash
         Returns a Script object
         '''
-        # use self.fetch_tx to get the transaction
-        tx = self.fetch_tx(testnet=testnet)
-        # get the output at self.prev_index
-        # return the script_pubkey property
-        return tx.tx_outs[self.prev_index].script_pubkey
+        if self._script_pubkey is None:
+            # use self.fetch_tx to get the transaction
+            tx = self.fetch_tx(testnet=testnet)
+            # get the output at self.prev_index
+            self._script_pubkey = tx.tx_outs[self.prev_index].script_pubkey
+        return self._script_pubkey
+
+    def finalize_p2pkh(self, sig, sec):
+        '''Puts together the ScriptSig for a p2pkh input so the input verifies.'''
+        # the ScriptSig for p2pkh is [sig, sec]
+        self.script_sig = Script([sig, sec])
 
 
 class TxOut:

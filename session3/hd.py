@@ -1,14 +1,13 @@
-import hmac
-
-from hashlib import sha512
-from hmac import HMAC
-from pbkdf2 import PBKDF2
+from io import BytesIO
 from unittest import TestCase
 
 from ecc import G, N, PrivateKey, S256Point
 from helper import (
     big_endian_to_int,
+    byte_to_int,
     encode_base58_checksum,
+    hmac_sha512,
+    hmac_sha512_kdf,
     int_to_big_endian,
     int_to_byte,
     raw_decode_base58,
@@ -17,7 +16,6 @@ from helper import (
 from mnemonic import secure_mnemonic, WORD_LOOKUP, WORD_LIST
 
 
-PBKDF2_ROUNDS = 2048
 MAINNET_XPRV = bytes.fromhex('0488ade4')
 MAINNET_XPUB = bytes.fromhex('0488b21e')
 MAINNET_YPRV = bytes.fromhex('049d7878')
@@ -35,16 +33,17 @@ TESTNET_ZPUB = bytes.fromhex('045f1cf6')
 class HDPrivateKey:
 
     def __init__(self, private_key, chain_code,
-                 depth=0, fingerprint=b'\x00\x00\x00\x00',
+                 depth=0, parent_fingerprint=b'\x00\x00\x00\x00',
                  child_number=0, testnet=False):
         # the main secret, should be a PrivateKey object
         self.private_key = private_key
+        self.private_key.testnet = testnet
         # the code to make derivation deterministic
         self.chain_code = chain_code
         # level the current key is at in the heirarchy
         self.depth = depth
         # fingerprint of the parent key
-        self.fingerprint = fingerprint
+        self.parent_fingerprint = parent_fingerprint
         # what order child this is
         self.child_number = child_number
         self.testnet = testnet
@@ -53,13 +52,16 @@ class HDPrivateKey:
             point=private_key.point,
             chain_code=chain_code,
             depth=depth,
-            fingerprint=fingerprint,
+            parent_fingerprint=parent_fingerprint,
             child_number=child_number,
             testnet=testnet,
         )
 
     def wif(self):
-        return self.private_key.wif(testnet=self.testnet)
+        return self.private_key.wif()
+
+    def sec(self):
+        return self.pub.sec()
 
     def address(self):
         return self.pub.address()
@@ -75,8 +77,7 @@ class HDPrivateKey:
 
     @classmethod
     def from_seed(cls, seed, testnet=False):
-        # create an HMAC using key=b'Bitcoin seed', msg=seed and
-        # digestmod=sha512.
+        # get hmac_sha512 with b'Bitcoin seed' and seed
         # create the private key using the first 32 bytes in big endian
         # chaincode is the last 32 bytes
         # return an instance of the class
@@ -91,14 +92,13 @@ class HDPrivateKey:
             #  big-endian and the index in 4 bytes big-endian.
             # the message data is the public key compressed SEC
             #  and the index in 4 bytes big-endian.
-        # the resulting hmac is with the key=chain code, msg=data
-        #  and digestmod=sha512
+        # get the hmac_sha512 with chain code and data
         # the new secret is the first 32 bytes as a big-endian integer
         #  plus the secret mod N
         # create the PrivateKey object
         # the chain code is the last 32 bytes
         # depth is whatever the current depth + 1
-        # fingerprint is the HDPublicKey's hash160's first 4 bytes
+        # parent_fingerprint is the fingerprint of this node
         # child number is the index
         # return a new HDPrivateKey instance
         raise NotImplementedError
@@ -120,10 +120,10 @@ class HDPrivateKey:
     def _prv(self, version):
         '''Returns the base58-encoded x/y/z prv.
         Expects a 4-byte version.'''
-        # version + depth + fingerprint + child number + chain code + private key
+        # version + depth + parent_fingerprint + child number + chain code + private key
         # start with version, which should be a constant depending on testnet
         # add depth, which is 1 byte using int_to_byte
-        # add the fingerprint
+        # add the parent_fingerprint
         # add the child number 4 bytes using int_to_big_endian
         # add the chain code
         # add the 0 byte and the private key's secret in big endian, 33 bytes
@@ -155,6 +155,9 @@ class HDPrivateKey:
         return self._prv(version)
 
     # passthrough methods
+    def fingerprint(self):
+        return self.pub.fingerprint()
+
     def xpub(self):
         return self.pub.xpub()
 
@@ -166,16 +169,25 @@ class HDPrivateKey:
 
     @classmethod
     def parse(cls, s):
+        '''Returns a HDPrivateKey from an extended key string'''
         # get the bytes from the base58 using raw_decode_base58
         # check that the length of the raw is 78 bytes, otherwise raise ValueError
+        # create a stream
+        # return the raw parsing of the stream
+        raise NotImplementedError
+
+    @classmethod
+    def raw_parse(cls, s):
+        '''Returns a HDPrivateKey from a stream'''
         # first 4 bytes are the version
         # check that the version is one of the TESTNET or MAINNET
-        #  public keys, if not raise a ValueError
+        #  private keys, if not raise a ValueError
         # the next byte is depth
-        # next 4 bytes are the fingerprint
+        # next 4 bytes are the parent_fingerprint
         # next 4 bytes is the child number in big-endian
         # next 32 bytes are the chain code
-        # last 33 bytes should be the SEC
+        # the next byte should be b'\x00'
+        # last 32 bytes should be the private key in big endian
         # return an instance of the class
         raise NotImplementedError
 
@@ -215,6 +227,7 @@ class HDPrivateKey:
         mnemonic = secure_mnemonic(entropy=entropy)
         return mnemonic, cls.from_mnemonic(mnemonic, password=password, testnet=testnet)
 
+
     @classmethod
     def from_mnemonic(cls, mnemonic, password=b'', path='m', testnet=False):
         '''Returns a HDPrivateKey object from the mnemonic.'''
@@ -234,25 +247,35 @@ class HDPrivateKey:
         # check that the checksum is correct or raise ValueError
         # normalize in case we got a mnemonic that's just the first 4 letters
         # salt is b'mnemonic' + password
-        # the seed is PBKDF2, with the arguments: normalized mnemonic,
-        # salt, iterations=2048, mac=hmac, digestmodule=sha512
+        # the seed is the hmac_sha512_kdf with normalized mnemonic and salt
         # return the HDPrivateKey at the path specified
         raise NotImplementedError
 
 
 class HDPublicKey:
 
-    def __init__(self, point, chain_code, depth, fingerprint,
+    def __init__(self, point, chain_code, depth, parent_fingerprint,
                  child_number, testnet=False):
         self.point = point
         self.chain_code = chain_code
         self.depth = depth
-        self.fingerprint = fingerprint
+        self.parent_fingerprint = parent_fingerprint
         self.child_number = child_number
         self.testnet = testnet
+        self._raw = None
+
+    def __repr__(self):
+        return self.xpub()
+
+    def sec(self):
+        return self.point.sec()
 
     def hash160(self):
         return self.point.hash160()
+
+    def fingerprint(self):
+        '''Fingerprint is the hash160's first 4 bytes'''
+        return self.hash160()[:4]
 
     def address(self):
         return self.point.address(testnet=self.testnet)
@@ -268,33 +291,16 @@ class HDPublicKey:
         Raises ValueError for indices >= 0x8000000.
         '''
         # if index >= 0x80000000, raise a ValueError
-        if index >= 0x80000000:
-            raise ValueError('child number should always be less than 2^31')
         # data is the SEC compressed and the index in 4 bytes big-endian
-        data = self.point.sec() + int_to_big_endian(index, 4)
-        # the resulting hmac is with the key=chain code, msg=data
-        #  and digestmod=sha512
-        h = HMAC(key=self.chain_code, msg=data, digestmod=sha512).digest()
+        # get hmac_sha512 with chain code, data
         # the new public point is the current point +
         #  the first 32 bytes in big endian * G
-        point = self.point + big_endian_to_int(h[:32]) * G
         # chain code is the last 32 bytes
-        chain_code = h[32:]
         # depth is current depth + 1
-        depth = self.depth + 1
-        # fingerprint is the hash160's first 4 bytes
-        fingerprint = self.hash160()[:4]
+        # parent_fingerprint is the fingerprint of this node
         # child number is the index
-        child_number = index
         # return the HDPublicKey instance
-        return HDPublicKey(
-            point=point,
-            chain_code=chain_code,
-            depth=depth,
-            fingerprint=fingerprint,
-            child_number=child_number,
-            testnet=self.testnet,
-        )
+        raise NotImplementedError
 
     def traverse(self, path):
         '''Returns the HDPublicKey at the path indicated.
@@ -313,16 +319,28 @@ class HDPublicKey:
         # return the current node
         return current
 
-    def _pub(self, version):
-        '''Returns the base58-encoded x/y/z pub.
-        Expects a 4-byte version.'''
-        # version + depth + fingerprint + child number + chain code + private key
+    def raw_serialize(self):
+        if self._raw is None:
+            if self.testnet:
+                version = TESTNET_XPUB
+            else:
+                version = MAINNET_XPUB
+            self._raw = self._serialize(version)
+        return self._raw
+
+    def _serialize(self, version):
         # start with the version
         # add the depth using int_to_byte
-        # add the fingerprint
+        # add the parent_fingerprint
         # add the child number in 4 bytes using int_to_big_endian
         # add the chain code
         # add the SEC pubkey
+        raise NotImplementedError
+
+    def _pub(self, version):
+        '''Returns the base58-encoded x/y/z pub.
+        Expects a 4-byte version.'''
+        # get the serialization
         # base58-encode the whole thing
         raise NotImplementedError
 
@@ -349,13 +367,21 @@ class HDPublicKey:
 
     @classmethod
     def parse(cls, s):
+        '''Returns a HDPublicKey from an extended key string'''
         # get the bytes from the base58 using raw_decode_base58
         # check that the length of the raw is 78 bytes, otherwise raise ValueError
+        # create a stream
+        # return the raw parsing of the stream
+        raise NotImplementedError
+
+    @classmethod
+    def raw_parse(cls, s):
+        '''Returns a HDPublicKey from a stream'''
         # first 4 bytes are the version
         # check that the version is one of the TESTNET or MAINNET
         #  public keys, if not raise a ValueError
         # the next byte is depth
-        # next 4 bytes are the fingerprint
+        # next 4 bytes are the parent_fingerprint
         # next 4 bytes is the child number in big-endian
         # next 32 bytes are the chain code
         # last 33 bytes should be the SEC

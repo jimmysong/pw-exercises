@@ -2,6 +2,9 @@ from io import BytesIO
 from unittest import TestCase, TestSuite, TextTestRunner
 
 import hashlib
+import hmac
+
+from pbkdf2 import PBKDF2
 
 
 SIGHASH_ALL = 1
@@ -10,6 +13,7 @@ SIGHASH_SINGLE = 3
 BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 BECH32_ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
 GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+PBKDF2_ROUNDS = 2048
 
 
 def run(test):
@@ -228,7 +232,10 @@ def decode_bech32(s):
 
 def read_varint(s):
     '''reads a variable integer from a stream'''
-    i = s.read(1)[0]
+    b = s.read(1)
+    if len(b) != 1:
+        raise IOError('stream has no bytes')
+    i = b[0]
     if i == 0xfd:
         # 0xfd means the next two bytes are the number
         return little_endian_to_int(s.read(2))
@@ -394,6 +401,31 @@ def number_to_op_code_byte(n):
         return b'\x00'
     elif n == -1:
         return b'\x4f'
+
+
+def op_code_to_number(op_code):
+    '''Returns the n for a particular OP code'''
+    if op_code not in (0, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96):
+        raise ValueError('Not a valid OP code')
+    if op_code == 0:
+        return 0
+    else:
+        return op_code - 80
+
+
+def hmac_sha512(key, msg):
+    return hmac.HMAC(key=key, msg=msg, digestmod=hashlib.sha512).digest()
+
+
+def hmac_sha512_kdf(msg, salt):
+    return PBKDF2(
+        msg,
+        salt,
+        iterations=PBKDF2_ROUNDS,
+        macmodule=hmac,
+        digestmodule=hashlib.sha512,
+    ).read(64)
+
 
 
 class HelperTest(TestCase):

@@ -3,15 +3,13 @@
 >>> import hd, tx
 
 #endcode
-#example
+#code
 >>> # Example Master Key Generation
->>> from hashlib import sha512
->>> from hmac import HMAC
 >>> from ecc import PrivateKey
->>> from helper import big_endian_to_int, raw_decode_base58
+>>> from helper import big_endian_to_int, hmac_sha512, raw_decode_base58
 >>> from hd import HDPrivateKey
 >>> seed = b'jimmy@programmingblockchain.com Jimmy Song'
->>> h = HMAC(key=b'Bitcoin seed', msg=seed, digestmod=sha512).digest()
+>>> h = hmac_sha512(b'Bitcoin seed', seed)
 >>> private_key = PrivateKey(secret=big_endian_to_int(h[:32]))
 >>> chain_code = h[32:]
 >>> master = HDPrivateKey(
@@ -22,64 +20,60 @@
 >>> print(master.bech32_address())
 tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_from_seed:
 #endunittest
-#example
+#code
 >>> # Example Unhardened Child Derivation
 >>> from ecc import N
->>> from hashlib import sha512
 >>> from hd import HDPrivateKey
->>> from helper import big_endian_to_int, int_to_big_endian
->>> from hmac import HMAC
+>>> from helper import big_endian_to_int, hmac_sha512, int_to_big_endian
 >>> seed_phrase = b'jimmy@programmingblockchain.com Jimmy Song'
 >>> master = HDPrivateKey.from_seed(seed_phrase, True)
 >>> index = 0
 >>> data = master.private_key.point.sec() + int_to_big_endian(index, 4)
->>> h = HMAC(key=master.chain_code, msg=data, digestmod=sha512).digest()
+>>> h = hmac_sha512(master.chain_code, data)
 >>> secret = (big_endian_to_int(h[:32]) + master.private_key.secret) % N
 >>> unhardened_child = HDPrivateKey(
 ...     private_key=PrivateKey(secret=secret),
 ...     chain_code=h[32:],
 ...     depth=master.depth + 1,
-...     fingerprint=master.pub.hash160()[:4],
+...     parent_fingerprint=master.fingerprint(),
 ...     child_number=index,
 ...     testnet=master.testnet,
 ... )
 >>> print(unhardened_child.bech32_address())
 tb1qu6mnnk54hxfhy4aj58v0w6e7q8hghtv8wcdl7g
 
-#endexample
-#example
+#endcode
+#code
 >>> # Example Hardened Child Derivation
 >>> from ecc import N
->>> from hashlib import sha512
 >>> from hd import HDPrivateKey
->>> from helper import big_endian_to_int, int_to_big_endian
->>> from hmac import HMAC
+>>> from helper import big_endian_to_int, hmac_sha512, int_to_big_endian
 >>> seed_phrase = b'jimmy@programmingblockchain.com Jimmy Song'
 >>> master = HDPrivateKey.from_seed(seed_phrase, True)
 >>> index = 0x80000002
 >>> data = int_to_big_endian(master.private_key.secret, 33) + int_to_big_endian(index, 4)
->>> h = HMAC(key=master.chain_code, msg=data, digestmod=sha512).digest()
+>>> h = hmac_sha512(master.chain_code, data)
 >>> secret = (big_endian_to_int(h[:32]) + master.private_key.secret) % N
 >>> hardened_child = HDPrivateKey(
 ...     private_key=PrivateKey(secret=secret),
 ...     chain_code=h[32:],
 ...     depth=master.depth + 1,
-...     fingerprint=master.pub.hash160()[:4],
+...     parent_fingerprint=master.fingerprint(),
 ...     child_number=index,
 ...     testnet=master.testnet,
 ... )
 >>> print(hardened_child.bech32_address())
 tb1qscu8evdlqsucj7p84xwnrf63h4jsdr5yqga8zq
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_child:
 #endunittest
-#example
+#code
 >>> # example of private key path traversal
 >>> from hd import HDPrivateKey
 >>> seed_phrase = b'jimmy@programmingblockchain.com Jimmy Song'
@@ -96,11 +90,11 @@ hd:HDTest:test_child:
 >>> print(current.bech32_address())
 tb1q423gz8cenqt6vfw987vlyxql0rh2jgh4sy0tue
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_traverse:
 #endunittest
-#example
+#code
 >>> # Example to create an xpub
 >>> from hd import HDPrivateKey
 >>> from helper import encode_base58_checksum, int_to_byte, int_to_big_endian
@@ -108,14 +102,14 @@ hd:HDTest:test_traverse:
 >>> hd_priv = HDPrivateKey.from_seed(passphrase)
 >>> raw = bytes.fromhex('0488b21e')
 >>> raw += int_to_byte(hd_priv.depth)
->>> raw += hd_priv.fingerprint
+>>> raw += hd_priv.parent_fingerprint
 >>> raw += int_to_big_endian(hd_priv.child_number, 4)
 >>> raw += hd_priv.chain_code
 >>> raw += hd_priv.pub.point.sec()
 >>> print(encode_base58_checksum(raw))
 xpub661MyMwAqRbcEpBhPYKfaLbRYynwb4fyL7N7xxB98h3sH5br3Tu4iNSe2S7yyP3AFXFoYRyZUWXJFw8o4sAaSTTQZLf8y3YJLRnJqSfnoWT
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_prv_pub:
 #endunittest
@@ -138,7 +132,7 @@ Create a xpub on testnet (should start with tpub)
 tpubD6NzVbkrYhZ4WcNYqjJknFvnt6tbaTB2sjxRKWEHUbom2NGZ7gk9rp7UGUCmVszQ3RniA1VS1cMLx7dQTj1pKtuhcwQSeaCXvPNibUHNR3F
 
 #endexercise
-#example
+#code
 >>> # Example of getting p2pkh/p2sh-p2wpkh/p2wpkh testnet addresses
 >>> from hd import HDPrivateKey
 >>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'
@@ -156,7 +150,7 @@ mpLAmKy2kMhTFSHRKcJzhdRTMjWYRp5rdt
 >>> print(hd_priv.traverse(p2wpkh_path).bech32_address())
 tb1qrpeej834jx0ll3euv86fg09865falq83zp7v27
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_get_address:
 #endunittest
@@ -196,7 +190,7 @@ tb1qrpeej834jx0ll3euv86fg09865falq83zp7v27
 tpubDDNz9YHarfY2LUuBCMs9nw25BfE8LTjXe2YSuqqZCCk4JdvFswmPUa9myShQng1FxHs2Z1bV9Wik5oR69DjJkEsZn2co7ejVKup8iAMNWyc
 
 #endexercise
-#example
+#code
 
 >>> def secure_mnemonic(entropy=0, num_bits=128):
 ...     # if we have more than 128 bits, just mask everything but the last 128 bits
@@ -225,13 +219,10 @@ tpubDDNz9YHarfY2LUuBCMs9nw25BfE8LTjXe2YSuqqZCCk4JdvFswmPUa9myShQng1FxHs2Z1bV9Wik
 ...     # return the mnemonic phrase by putting spaces between
 ...     return ' '.join(mnemonic)
 
-#endexample
-#example
->>> import hmac
->>> from hashlib import sha512
->>> from pbkdf2 import PBKDF2
+#endcode
+#code
 >>> from hd import HDPrivateKey
->>> from helper import sha256
+>>> from helper import hmac_sha512_kdf, sha256
 >>> from mnemonic import WORD_LOOKUP, WORD_LIST
 >>> mnemonic = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
 >>> password = b'TREZOR'
@@ -254,11 +245,11 @@ tpubDDNz9YHarfY2LUuBCMs9nw25BfE8LTjXe2YSuqqZCCk4JdvFswmPUa9myShQng1FxHs2Z1bV9Wik
 ...     normalized_words.append(WORD_LIST[WORD_LOOKUP[word]])
 >>> normalized_mnemonic = ' '.join(normalized_words)
 >>> salt = b'mnemonic' + password
->>> seed = PBKDF2(normalized_mnemonic, salt, iterations=2048, macmodule=hmac, digestmodule=sha512).read(64)
+>>> seed = hmac_sha512_kdf(normalized_mnemonic, salt)
 >>> print(HDPrivateKey.from_seed(seed).xprv())
 xprv9s21ZrQH143K2gA81bYFHqU68xz1cX2APaSq5tt6MFSLeXnCKV1RVUJt9FWNTbrrryem4ZckN8k4Ls1H6nwdvDTvnV7zEXs2HgPezuVccsq
 
-#endexample
+#endcode
 #unittest
 hd:HDTest:test_from_mnemonic:
 #endunittest
@@ -280,18 +271,14 @@ tpubDD1e7uBTB1CxR8tJYsWswsrJob2R639TRSDgN3eyPyJJ6qoqZwHZ3GWdJ69Ppmpwy6aRhhQmx6WJ
 #endexercise
 '''
 
-import hmac
 
-from hashlib import sha512
-from hmac import HMAC
-from pbkdf2 import PBKDF2
+from io import BytesIO
 from unittest import TestCase
 
-from ecc import N, PrivateKey, S256Point
+from ecc import G, N, PrivateKey, S256Point
 from hd import (
     HDPrivateKey,
     HDPublicKey,
-    PBKDF2_ROUNDS,
     MAINNET_XPRV,
     MAINNET_XPUB,
     MAINNET_YPRV,
@@ -307,7 +294,10 @@ from hd import (
 )
 from helper import (
     big_endian_to_int,
+    byte_to_int,
     encode_base58_checksum,
+    hmac_sha512,
+    hmac_sha512_kdf,
     int_to_big_endian,
     int_to_byte,
     raw_decode_base58,
@@ -340,30 +330,30 @@ def _get_address(self, purpose, account=0, external=True, address=0):
 def _prv(self, version):
     raw = version
     raw += int_to_byte(self.depth)
-    raw += self.fingerprint
+    raw += self.parent_fingerprint
     raw += int_to_big_endian(self.child_number, 4)
     raw += self.chain_code
     raw += int_to_big_endian(self.private_key.secret, 33)
     return encode_base58_checksum(raw)
 
 
-def child(self, index):
+def xprv_child(self, index):
     if index >= 0x80000000:
         data = int_to_big_endian(self.private_key.secret, 33) + int_to_big_endian(index, 4)
     else:
         data = self.private_key.point.sec() + int_to_big_endian(index, 4)
-    h = HMAC(key=self.chain_code, msg=data, digestmod=sha512).digest()
+    h = hmac_sha512(self.chain_code, data)
     secret = (big_endian_to_int(h[:32]) + self.private_key.secret) % N
     private_key = PrivateKey(secret=secret)
     chain_code = h[32:]
     depth = self.depth + 1
-    fingerprint = self.pub.hash160()[:4]
+    parent_fingerprint = self.pub.hash160()[:4]
     child_number = index
     return HDPrivateKey(
         private_key=private_key,
         chain_code=chain_code,
         depth=depth,
-        fingerprint=fingerprint,
+        parent_fingerprint=parent_fingerprint,
         child_number=child_number,
         testnet=self.testnet,
     )
@@ -371,7 +361,7 @@ def child(self, index):
 
 @classmethod
 def from_seed(cls, seed, testnet=False):
-    h = HMAC(key=b'Bitcoin seed', msg=seed, digestmod=sha512).digest()
+    h = hmac_sha512(b'Bitcoin seed', seed)
     private_key = PrivateKey(secret=big_endian_to_int(h[:32]))
     chain_code = h[32:]
     return cls(
@@ -402,14 +392,28 @@ def from_mnemonic(cls, mnemonic, password=b'', path='m', testnet=False):
         normalized_words.append(WORD_LIST[WORD_LOOKUP[word]])
     normalized_mnemonic = ' '.join(normalized_words)
     salt = b'mnemonic' + password
-    seed = PBKDF2(
-        normalized_mnemonic,
-        salt,
-        iterations=PBKDF2_ROUNDS,
-        macmodule=hmac,
-        digestmodule=sha512,
-    ).read(64)
+    seed = hmac_sha512_kdf(normalized_mnemonic, salt)
     return cls.from_seed(seed, testnet=testnet).traverse(path)
+
+
+def xpub_child(self, index):
+    if index >= 0x80000000:
+        raise ValueError('child number should always be less than 2^31')
+    data = self.point.sec() + int_to_big_endian(index, 4)
+    h = hmac_sha512(key=self.chain_code, msg=data)
+    point = self.point + big_endian_to_int(h[:32]) * G
+    chain_code = h[32:]
+    depth = self.depth + 1
+    parent_fingerprint = self.fingerprint()
+    child_number = index
+    return HDPublicKey(
+        point=point,
+        chain_code=chain_code,
+        depth=depth,
+        parent_fingerprint=parent_fingerprint,
+        child_number=child_number,
+        testnet=self.testnet,
+    )
 
 
 @classmethod
@@ -417,25 +421,30 @@ def xprv_parse(cls, s):
     raw = raw_decode_base58(s)
     if len(raw) != 78:
         raise ValueError('Not a proper extended key')
-    version = raw[:4]
+    stream = BytesIO(raw)
+    return cls.raw_parse(stream)
+
+@classmethod
+def xprv_raw_parse(cls, s):
+    version = s.read(4)
     if version in (TESTNET_XPRV, TESTNET_YPRV, TESTNET_ZPRV):
         testnet = True
     elif version in (MAINNET_XPRV, MAINNET_YPRV, MAINNET_ZPRV):
         testnet = False
     else:
         raise ValueError('not an xprv, yprv or zprv: {}'.format(version))
-    depth = raw[4]
-    fingerprint = raw[5:9]
-    child_number = big_endian_to_int(raw[9:13])
-    chain_code = raw[13:45]
-    if raw[45] != 0:
+    depth = byte_to_int(s.read(1))
+    parent_fingerprint = s.read(4)
+    child_number = big_endian_to_int(s.read(4))
+    chain_code = s.read(32)
+    if byte_to_int(s.read(1)) != 0:
         raise ValueError('private key should be preceded by a zero byte')
-    private_key = PrivateKey(secret=big_endian_to_int(raw[46:]))
+    private_key = PrivateKey(secret=big_endian_to_int(s.read(32)))
     return cls(
         private_key=private_key,
         chain_code=chain_code,
         depth=depth,
-        fingerprint=fingerprint,
+        parent_fingerprint=parent_fingerprint,
         child_number=child_number,
         testnet=testnet,
     )
@@ -453,13 +462,20 @@ def xprv_traverse(self, path):
     return current
 
 
-def _pub(self, version):
+def _serialize(self, version):
     raw = version
     raw += int_to_byte(self.depth)
-    raw += self.fingerprint
+    raw += self.parent_fingerprint
     raw += int_to_big_endian(self.child_number, 4)
     raw += self.chain_code
     raw += self.point.sec()
+    return raw
+
+
+def _pub(self, version):
+    '''Returns the base58-encoded x/y/z pub.
+    Expects a 4-byte version.'''
+    raw = self._serialize(version)
     return encode_base58_checksum(raw)
 
 
@@ -468,23 +484,29 @@ def xpub_parse(cls, s):
     raw = raw_decode_base58(s)
     if len(raw) != 78:
         raise ValueError('Not a proper extended key')
-    version = raw[:4]
+    stream = BytesIO(raw)
+    return cls.raw_parse(stream)
+
+
+@classmethod
+def xpub_raw_parse(cls, s):
+    version = s.read(4)
     if version in (TESTNET_XPUB, TESTNET_YPUB, TESTNET_ZPUB):
         testnet = True
     elif version in (MAINNET_XPUB, MAINNET_YPUB, MAINNET_ZPUB):
         testnet = False
     else:
         raise ValueError('not an xpub, ypub or zpub: {} {}'.format(s, version))
-    depth = raw[4]
-    fingerprint = raw[5:9]
-    child_number = big_endian_to_int(raw[9:13])
-    chain_code = raw[13:45]
-    point = S256Point.parse(raw[45:])
+    depth = byte_to_int(s.read(1))
+    parent_fingerprint = s.read(4)
+    child_number = big_endian_to_int(s.read(4))
+    chain_code = s.read(32)
+    point = S256Point.parse(s.read(33))
     return cls(
         point=point,
         chain_code=chain_code,
         depth=depth,
-        fingerprint=fingerprint,
+        parent_fingerprint=parent_fingerprint,
         child_number=child_number,
         testnet=testnet,
     )
@@ -505,11 +527,15 @@ class SessionTest(TestCase):
     def test_apply(self):
         HDPrivateKey._get_address = _get_address
         HDPrivateKey._prv = _prv
-        HDPrivateKey.child = child
+        HDPrivateKey.child = xprv_child
         HDPrivateKey.from_seed = from_seed
         HDPrivateKey.from_mnemonic = from_mnemonic
         HDPrivateKey.parse = xprv_parse
+        HDPrivateKey.raw_parse = xprv_raw_parse
         HDPrivateKey.traverse = xprv_traverse
         HDPublicKey._pub = _pub
+        HDPublicKey._serialize = _serialize
+        HDPublicKey.child = xpub_child
         HDPublicKey.parse = xpub_parse
+        HDPublicKey.raw_parse = xpub_raw_parse
         HDPublicKey.traverse = xpub_traverse

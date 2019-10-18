@@ -11,6 +11,7 @@ from helper import (
     hash160,
     hash256,
     int_to_big_endian,
+    raw_decode_base58,
 )
 
 
@@ -419,6 +420,9 @@ class S256Point(Point):
         else:
             super().__init__(x=x, y=y, a=a, b=b)
 
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
     def __repr__(self):
         if self.x is None:
             return 'S256Point(infinity)'
@@ -612,11 +616,21 @@ class Signature:
         # if rbin has a high bit, add a 00
         if rbin[0] >= 128:
             rbin = b'\x00' + rbin
+        while rbin[0] == 0:
+            if rbin[1] >= 128:
+                break
+            else:
+                rbin = rbin[1:]
         result = bytes([2, len(rbin)]) + rbin
         sbin = int_to_big_endian(self.s, 32)
         # if sbin has a high bit, add a 00
         if sbin[0] >= 128:
             sbin = b'\x00' + sbin
+        while sbin[0] == 0:
+            if sbin[1] >= 128:
+                break
+            else:
+                sbin = sbin[1:]
         result += bytes([2, len(sbin)]) + sbin
         return bytes([0x30, len(result)]) + result
 
@@ -662,9 +676,10 @@ class SignatureTest(TestCase):
 
 class PrivateKey:
 
-    def __init__(self, secret):
+    def __init__(self, secret, testnet=False):
         self.secret = secret
         self.point = secret * G
+        self.testnet = testnet
 
     def hex(self):
         return '{:x}'.format(self.secret).zfill(64)
@@ -713,11 +728,11 @@ class PrivateKey:
         # sign the message using the self.sign method
         raise NotImplementedError
 
-    def wif(self, compressed=True, testnet=False):
+    def wif(self, compressed=True):
         # convert the secret from integer to a 32-bytes in big endian using int_to_big_endian(x, 32)
         secret_bytes = int_to_big_endian(self.secret, 32)
         # prepend b'\xef' on testnet, b'\x80' on mainnet
-        if testnet:
+        if self.testnet:
             prefix = b'\xef'
         else:
             prefix = b'\x80'
@@ -728,6 +743,23 @@ class PrivateKey:
             suffix = b''
         # encode_base58_checksum the whole thing
         return encode_base58_checksum(prefix + secret_bytes + suffix)
+
+    @classmethod
+    def parse(cls, wif):
+        '''Converts WIF to a PrivateKey object'''
+        raw = raw_decode_base58(wif)
+        if len(raw) == 34:  # compressed
+            if raw[-1] != 1:
+                raise ValueError('Invalid WIF')
+            raw = raw[:-1]
+        secret = big_endian_to_int(raw[1:])
+        if raw[0] == 0xef:
+            testnet = True
+        elif raw[0] == 0x80:
+            testnet = False
+        else:
+            raise ValueError('Invalid WIF')
+        return cls(secret, testnet=testnet)
 
 
 class PrivateKeyTest(TestCase):

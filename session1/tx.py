@@ -10,13 +10,10 @@ from helper import (
     decode_base58,
     hash256,
     encode_varint,
-    encode_varstr,
     int_to_byte,
     int_to_little_endian,
     little_endian_to_int,
-    number_to_op_code_byte,
     read_varint,
-    read_varstr,
     SIGHASH_ALL,
 )
 from script import (
@@ -25,6 +22,7 @@ from script import (
     Script,
     ScriptPubKey,
 )
+from witness import Witness
 
 
 class TxFetcher:
@@ -101,6 +99,9 @@ class Tx:
             self.locktime,
         )
 
+    def clone(self):
+        return self.__class__.parse(BytesIO(self.serialize()), testnet=self.testnet)
+
     def id(self):
         '''Human-readable hexadecimal of the transaction hash'''
         return self.hash().hex()
@@ -159,11 +160,7 @@ class Tx:
         # each output needs parsing, create outputs array
         # parse each output and add to the outputs array
         # there is a witness for each input
-            # read the number of items for each input using read_varint
-            # create the witness array as the witness property of tx_in
-            # iterate through the number of items
-                # read the item using read_varstr
-                # add the item to the witness array
+            # use Witness.parse to grab the witness
         # locktime is 4 bytes, little-endian
         # return an instance of the class (cls(...))
         raise NotImplementedError
@@ -205,11 +202,7 @@ class Tx:
         # iterate outputs
             # serialize each output
         # add the witness data for each input
-            # encode the number of items in the witness in little-endian
-            # iterate through the items in the witness field
-                # if the item is an integer, convert to op code
-                # using number_to_op_code_byte
-                # else encode_varstr to encode the item
+            # serialize the witness field
         # serialize locktime (4 bytes, little endian)
         raise NotImplementedError
 
@@ -305,11 +298,13 @@ class Tx:
         # add the HashPrevouts and HashSequence
         # add the previous transaction hash in little endian
         # add the previous transaction index in 4 bytes, little endian
-        # for p2wpkh, we need the previous script pubkey
-            # Exercise 8: for p2sh-p2wpkh, it's the second command of the redeem script
+        # for p2wpkh, we need to compute the ScriptCode
+            # Exercise 8: for p2sh-p2wpkh, get the hash160 which is the 2nd command of the RedeemScript
+            # the ScriptCode is the P2PKHScriptPubKey created using the hash160
         # get the script pubkey associated with the previous output (remember testnet)
         # next get the hash160 in the script_pubkey. for p2wpkh, it's the second command
-        # turn the hash160 into the serialized p2pkh script and add it
+        # finally the ScriptCode is the P2PKHScriptPubKey created using the hash160
+        # add the serialized ScriptCode
         # add the value of the input in 8 bytes, little endian
         # add the sequence of the input in 4 bytes, little endian
         # add the HashOutputs
@@ -324,26 +319,21 @@ class Tx:
         tx_in = self.tx_ins[input_index]
         # get the script_pubkey of the input
         script_pubkey = tx_in.script_pubkey(testnet=self.testnet)
-        # check to see if the script_pubkey is a p2sh
+        # grab the RedeemScript if we have a p2sh
         if script_pubkey.is_p2sh():
-            # the last command of the ScriptSig is the RedeemScript
+            # the last command of the ScriptSig is the raw RedeemScript
             raw_redeem_script = tx_in.script_sig.commands[-1]
             # convert to RedeemScript
             redeem_script = RedeemScript.convert(raw_redeem_script)
-            # the redeem script might be a segwit pubkey
-            if redeem_script.is_p2wpkh():
-                # calculate the z using sig_hash_bip143
-                z = self.sig_hash_bip143(input_index, redeem_script)
-            else:
-                # calculate z as normal
-                z = self.sig_hash(input_index, redeem_script)
         else:
-            if script_pubkey.is_p2wpkh():
-                # calculate the z using sig_hash_bip143
-                z = self.sig_hash_bip143(input_index)
-            else:
-                # calculate z as normal
-                z = self.sig_hash(input_index)
+            redeem_script = None
+        # check to see if the ScriptPubKey or the RedeemScript is p2wpkh
+        if script_pubkey.is_p2wpkh() or (redeem_script and redeem_script.is_p2wpkh()):
+            # calculate the z using sig_hash_bip143
+            z = self.sig_hash_bip143(input_index, redeem_script)
+        else:
+            # calculate z using legacy
+            z = self.sig_hash(input_index, redeem_script)
         # combine the scripts
         combined_script = tx_in.script_sig + tx_in.script_pubkey(self.testnet)
         # evaluate the combined script
@@ -360,41 +350,29 @@ class Tx:
 
     def sign_p2pkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
-        # get the sig_hash (z)
-        z = self.sig_hash(input_index)
-        # get der signature of z from private key
-        der = private_key.sign(z).der()
-        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
-        sig = der + int_to_byte(SIGHASH_ALL)
+        # get the sig using get_sig_legacy
+        sig = self.get_sig_legacy(input_index, private_key)
         # calculate the sec
         sec = private_key.point.sec()
-        # initialize a new script with [sig, sec] as the elements
-        script_sig = Script([sig, sec])
-        # change input's script_sig to new script
-        self.tx_ins[input_index].script_sig = script_sig
+        # finalize the input using finalize_p2pkh
+        self.tx_ins[input_index].finalize_p2pkh(sig, sec)
         # return whether sig is valid using self.verify_input
         return self.verify_input(input_index)
 
     def sign_p2wpkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
-        # get the sig hash (z) using the bip143 serialization
-        # get der signature of z from private key
-        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        # get the sig using get_sig_segwit
         # calculate the sec
-        # change input's witness to be an array of signature and sec pub key
+        # finalize the input using finalize_p2wpkh
         # return whether sig is valid using self.verify_input
         raise NotImplementedError
 
     def sign_p2sh_p2wpkh(self, input_index, private_key):
         '''Signs the input assuming that the previous output is a p2pkh using the private key'''
-        # grab the input
-        # the RedeemScript can be computed from the public key
-        # set the tx_in ScriptSig with the raw-serialization RedeemScript as the only command
-        # get the sig hash (z) using the bip143 serialization, pass in the RedeemScript
-        # get der signature of z from private key
-        # append the SIGHASH_ALL to der (use int_to_byte(SIGHASH_ALL))
+        # use p2sh_p2wpkh_redeem_script to get the RedeemScript
+        # get the sig using get_sig_segwit
         # calculate the sec
-        # change input's witness to be an array of signature and sec pub key
+        # finalize the input using finalize_p2wpkh
         # return whether sig is valid using self.verify_input
         raise NotImplementedError
 
@@ -414,6 +392,31 @@ class Tx:
         # else return a RuntimeError
         else:
             raise RuntimeError('Unknown ScriptPubKey')
+
+    def get_sig_legacy(self, input_index, private_key, redeem_script=None):
+        # get the sig hash (z)
+        z = self.sig_hash(input_index, redeem_script=redeem_script)
+        # get der signature of z from private key
+        der = private_key.sign(z).der()
+        # append the SIGHASH_ALL with int_to_byte(SIGHASH_ALL)
+        return der + int_to_byte(SIGHASH_ALL)
+
+    def get_sig_segwit(self, input_index, private_key, redeem_script=None, witness_script=None):
+        # get the sig_hash (z)
+        # get der signature of z from private key
+        # append the SIGHASH_ALL with int_to_byte(SIGHASH_ALL)
+        raise NotImplementedError
+
+    def check_sig_legacy(self, input_index, point, signature, redeem_script=None):
+        # get the sig_hash (z)
+        z = self.sig_hash(input_index, redeem_script)
+        # return whether the signature verifies
+        return point.verify(z, signature)
+
+    def check_sig_segwit(self, input_index, point, signature, redeem_script=None, witness_script=None):
+        # get the sig_hash (z)
+        # return whether the signature verifies
+        raise NotImplementedError
 
     def is_coinbase(self):
         '''Returns whether this transaction is a coinbase transaction or not'''
@@ -464,7 +467,9 @@ class TxIn:
         else:
             self.script_sig = script_sig
         self.sequence = sequence
-        self.witness = []
+        self._value = None
+        self._script_pubkey = None
+        self.witness = Witness()
 
     def __repr__(self):
         return '{}:{}'.format(
@@ -509,21 +514,35 @@ class TxIn:
         '''Get the outpoint value by looking up the tx hash
         Returns the amount in satoshi
         '''
-        # use self.fetch_tx to get the transaction
-        tx = self.fetch_tx(testnet=testnet)
-        # get the output at self.prev_index
-        # return the amount property
-        return tx.tx_outs[self.prev_index].amount
+        if self._value is None:
+            # use self.fetch_tx to get the transaction
+            tx = self.fetch_tx(testnet=testnet)
+            # get the output at self.prev_index
+            self._value = tx.tx_outs[self.prev_index].amount
+        return self._value
 
     def script_pubkey(self, testnet=False):
         '''Get the scriptPubKey by looking up the tx hash
         Returns a Script object
         '''
-        # use self.fetch_tx to get the transaction
-        tx = self.fetch_tx(testnet=testnet)
-        # get the output at self.prev_index
-        # return the script_pubkey property
-        return tx.tx_outs[self.prev_index].script_pubkey
+        if self._script_pubkey is None:
+            # use self.fetch_tx to get the transaction
+            tx = self.fetch_tx(testnet=testnet)
+            # get the output at self.prev_index
+            self._script_pubkey = tx.tx_outs[self.prev_index].script_pubkey
+        return self._script_pubkey
+
+    def finalize_p2pkh(self, sig, sec):
+        '''Puts together the ScriptSig for a p2pkh input so the input verifies.'''
+        # the ScriptSig for p2pkh is [sig, sec]
+        self.script_sig = Script([sig, sec])
+
+    def finalize_p2wpkh(self, sig, sec, redeem_script=None):
+        '''Puts together the ScriptSig and Witness for a p2wpkh input so the input verifies.'''
+        # if the RedeemScript is given, the ScriptSig is a single element Script of its raw serialization
+        # else the ScriptSig should be empty
+        # the Witness for p2wpkh is [sig, sec]
+        raise NotImplementedError
 
 
 class TxOut:

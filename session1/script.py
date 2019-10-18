@@ -9,6 +9,7 @@ from helper import (
     encode_varstr,
     hash160,
     int_to_byte,
+    int_to_little_endian,
     read_varint,
 )
 from op import (
@@ -106,12 +107,12 @@ class Script:
                     result += int_to_byte(length)
                 elif length > 75 and length < 0x100:
                     # 76 is pushdata1
-                    result += int_to_byte(76, 1)
-                    result += int_to_byte(length, 1)
+                    result += int_to_byte(76)
+                    result += int_to_byte(length)
                 elif length >= 0x100 and length <= 520:
                     # 77 is pushdata2
-                    result += int_to_byte(77, 1)
-                    result += int_to_byte(length, 2)
+                    result += int_to_byte(77)
+                    result += int_to_little_endian(length, 2)
                 else:
                     raise ValueError('too long a command')
                 result += command
@@ -185,7 +186,7 @@ class Script:
                 if len(stack) == 2 and stack[0] == b'' and len(stack[1]) == 20:
                     h160 = stack.pop()
                     stack.pop()
-                    commands.extend(witness)
+                    commands.extend(witness.items)
                     commands.extend(P2PKHScriptPubKey(h160).commands)
         if len(stack) == 0:
             return False
