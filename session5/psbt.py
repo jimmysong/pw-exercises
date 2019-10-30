@@ -1,5 +1,5 @@
 from io import BytesIO
-from unittest import TestCase, SkipTest
+from unittest import TestCase
 
 from ecc import PrivateKey, S256Point, Signature
 from hd import HDPrivateKey, HDPublicKey
@@ -50,7 +50,6 @@ PSBT_OUT_WITNESS_SCRIPT = b'\x01'
 PSBT_OUT_BIP32_DERIVATION = b'\x02'
 
 
-
 class NamedPublicKey(S256Point):
 
     def __repr__(self):
@@ -60,7 +59,7 @@ class NamedPublicKey(S256Point):
         self.root_fingerprint = raw_path[:4]
         self.root_path = parse_binary_path(raw_path[4:])
         self.raw_path = raw_path
-    
+
     @classmethod
     def parse(cls, key, s):
         point = super().parse(key[1:])
@@ -70,7 +69,7 @@ class NamedPublicKey(S256Point):
 
     def serialize(self, prefix):
         return serialize_key_value(prefix + self.sec(), self.raw_path)
-    
+
 
 class NamedHDPublicKey(HDPublicKey):
 
@@ -109,8 +108,23 @@ class NamedHDPublicKey(HDPublicKey):
             lookup[child.hash160()] = child
         return lookup
 
+    def redeem_script_lookup(self, max_external=9, max_internal=9):
+        '''Returns a dictionary of RedeemScripts associated with p2sh-p2wpkh for the BIP44 child ScriptPubKeys'''
+        # create a lookup to send back
+        # create the external child (0)
+        # loop through to the maximum external child + 1
+            # grab the child at the index
+            # create the p2sh-p2wpkh RedeemScript of [0, hash160]
+            # hash160 of the RedeemScript is the key, RedeemScript is the value
+        # create the internal child (1)
+        # loop through to the maximum internal child + 1
+            # grab the child at the index
+            # create the p2sh-p2wpkh RedeemScript of [0, hash160]
+            # hash160 of the RedeemScript is the key, RedeemScript is the value
+        # return the lookup
+        raise NotImplementedError
+
     def bip44_lookup(self, max_external=9, max_internal=9):
-        lookup = {}
         external = self.child(0)
         internal = self.child(1)
         return {**external.pubkey_lookup(max_external), **internal.pubkey_lookup(max_internal)}
@@ -147,6 +161,26 @@ class NamedHDPublicKey(HDPublicKey):
         return current.point == named_pubkey
 
 
+class NamedHDPublicKeyTest(TestCase):
+
+    def test_redeem_script_lookup(self):
+        hex_named_hd = '4f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c0000800100008000000080'
+        stream = BytesIO(bytes.fromhex(hex_named_hd))
+        named_hd = NamedHDPublicKey.parse(read_varstr(stream), stream)
+        redeem_script_lookup = named_hd.redeem_script_lookup(max_external=1, max_internal=1)
+        want = {
+            bytes.fromhex('e2e642a0ab2cd9a77ae21e7f66610bc7e6647788'):
+            RedeemScript([0, bytes.fromhex('9a9bfaf8ef6c4b061a30e8e162da3458cfa122c6')]),
+            bytes.fromhex('df71c379eef82782c8f88b5228a9caf3f1ca3ecb'):
+            RedeemScript([0, bytes.fromhex('b0c0277be1a8ee3e709e279d47eda9ed1058e5fc')]),
+            bytes.fromhex('fad70562a3a2f5fdaeacfac35da9411b8d42934f'):
+            RedeemScript([0, bytes.fromhex('c9bb368409c824f0a900f2f9b935d6de8c8b3ef7')]),
+            bytes.fromhex('7d3dc1a56742708417819e201a4c572887e9555c'):
+            RedeemScript([0, bytes.fromhex('1d36b1aa0b873fc919d3823e8bd162eba62ecf5d')]),
+        }
+        self.assertEqual(redeem_script_lookup, want)
+
+
 class PSBT:
 
     def __init__(self, tx_obj, psbt_ins, psbt_outs, hd_pubs=None, extra_map=None):
@@ -162,10 +196,12 @@ class PSBT:
         if len(self.tx_obj.tx_ins) != len(self.psbt_ins):
             raise ValueError('Number of psbt_ins in the transaction should match the psbt_ins array')
         for i, psbt_in in enumerate(self.psbt_ins):
+            # validate the input
             psbt_in.validate()
             tx_in = self.tx_obj.tx_ins[i]
             if tx_in.script_sig.commands:
                 raise ValueError('ScriptSig for the tx should not be defined')
+            # validate the ScriptSig
             if psbt_in.script_sig:
                 tx_in.script_sig = psbt_in.script_sig
                 tx_in.witness = psbt_in.witness
@@ -173,6 +209,7 @@ class PSBT:
                     raise ValueError('ScriptSig/Witness at input {} provided, but not valid'.format(i))
                 tx_in.script_sig = Script()
                 tx_in.witness = Witness()
+            # validate the signatures
             if psbt_in.sigs:
                 for sec, sig in psbt_in.sigs.items():
                     point = S256Point.parse(sec)
@@ -185,6 +222,7 @@ class PSBT:
                         # segwit
                         if not self.tx_obj.check_sig_segwit(i, point, signature, psbt_in.redeem_script, psbt_in.witness_script):
                             raise ValueError('segwit signature provided does not validate')
+            # validate the NamedPublicKeys
             if psbt_in.named_pubs:
                 for named_pub in psbt_in.named_pubs.values():
                     for hd_pub in self.hd_pubs.values():
@@ -195,7 +233,9 @@ class PSBT:
         if len(self.tx_obj.tx_outs) != len(self.psbt_outs):
             raise ValueError('Number of psbt_outs in the transaction should match the psbt_outs array')
         for psbt_out in self.psbt_outs:
+            # validate output
             psbt_out.validate()
+            # validate the NamedPublicKeys
             if psbt_out.named_pubs:
                 for named_pub in psbt_out.named_pubs.values():
                     for hd_pub in self.hd_pubs.values():
@@ -255,48 +295,75 @@ class PSBT:
         for psbt_out in self.psbt_outs:
             psbt_out.update(pubkey_lookup, redeem_lookup, witness_lookup)
 
-    def get_signing_raw_paths(self):
-        '''Returns a list of all raw paths that can sign something'''
-        # start a list of raw paths
-        raw_paths = []
-        # iterate through the PSBT inputs
-        for psbt_in in self.psbt_ins:
-            # iterate through the named_pubs values
+    def sign(self, hd_priv):
+        '''Signs appropriate inputs with the hd private key provided'''
+        # set the signed boolean to False until we sign something
+        signed = False
+        # grab the fingerprint of the private key
+        fingerprint = hd_priv.fingerprint()
+        # iterate through each PSBTIn
+        for i, psbt_in in enumerate(self.psbt_ins):
+            # iterate through the public keys associated with the PSBTIn
             for named_pub in psbt_in.named_pubs.values():
-                # add the raw path to the list
-                raw_paths.append(named_pub.raw_path)
-        # return the aggregate list
-        return raw_paths
-            
-    def sign(self, private_keys):
-        '''Signs appropriate inputs with the private keys provided'''
+                # if the fingerprints match
+                if named_pub.root_fingerprint == fingerprint:
+                    # get the private key at the root_path of the NamedPublicKey
+                    private_key = hd_priv.traverse(named_pub.root_path).private_key
+                    # check if prev_tx is defined (legacy)
+                    if psbt_in.prev_tx:
+                        # get the signature using get_sig_legacy
+                        sig = self.tx_obj.get_sig_legacy(i, private_key, psbt_in.redeem_script)
+                        # update the sigs dict of the PSBTIn object
+                        #  key is the sec and the value is the sig
+                        psbt_in.sigs[private_key.point.sec()] = sig
+                    # Exercise 4: check if prev_out is defined (segwit)
+                    elif psbt_in.prev_out:
+                        # get the signature using get_sig_segwit
+                        # update the sigs dict of the PSBTIn object
+                        #  key is the sec and the value is the sig
+                        raise NotImplementedError
+                    else:
+                        raise ValueError('pubkey included without the previous output')
+                    # set signed to True
+                    signed = True
+        # return whether we signed something
+        return signed
+
+    def sign_with_private_keys(self, private_keys):
+        '''Signs appropriate inputs with the hd private key provided'''
+        # set the signed boolean to False until we sign something
         signed = False
         # iterate through each private key
         for private_key in private_keys:
+            # grab the point associated with the point
             point = private_key.point
             # iterate through each PSBTIn
             for i, psbt_in in enumerate(self.psbt_ins):
                 # if the sec is in the named_pubs dictionary
                 if psbt_in.named_pubs.get(point.sec()):
-                    # check if prev_tx is defined (legacy)
                     if psbt_in.prev_tx:
-                        # Exercise 5
-                        # for legacy, get the signature using get_sig_legacy
+                        # get the signature using get_sig_legacy
                         sig = self.tx_obj.get_sig_legacy(i, private_key, psbt_in.redeem_script)
                         # update the sigs dict of the PSBTIn object
                         #  key is the sec and the value is the sig
-                        psbt_in.sigs[point.sec()] = sig
+                        psbt_in.sigs[private_key.point.sec()] = sig
+                    # Exercise 4: check if prev_out is defined (segwit)
                     elif psbt_in.prev_out:
-                        # segwit
+                        # get the signature using get_sig_segwit
                         sig = self.tx_obj.get_sig_segwit(i, private_key, psbt_in.redeem_script, psbt_in.witness_script)
-                        psbt_in.sigs[point.sec()] = sig
+                        # update the sigs dict of the PSBTIn object
+                        #  key is the sec and the value is the sig
+                        psbt_in.sigs[private_key.point.sec()] = sig
                     else:
                         raise ValueError('pubkey included without the previous output')
+                    # set signed to True
                     signed = True
+        # return whether we signed something
         return signed
 
     def combine(self, other):
         '''combines information from another PSBT to this one'''
+        # the tx_obj properties should be the same or raise a ValueError
         if self.tx_obj.hash() != other.tx_obj.hash():
             raise ValueError('cannot combine PSBTs that refer to different transactions')
         # combine the hd_pubs
@@ -311,7 +378,10 @@ class PSBT:
             psbt_out_1.combine(psbt_out_2)
 
     def finalize(self):
+        '''Finalize the transaction by filling in the ScriptSig and Witness fields for each input'''
+        # iterate through the inputs
         for psbt_in in self.psbt_ins:
+            # finalize each input
             psbt_in.finalize()
 
     def final_tx(self):
@@ -327,10 +397,10 @@ class PSBT:
         for tx_in, psbt_in in zip(tx_obj.tx_ins, self.psbt_ins):
             # set the ScriptSig of the transaction input
             tx_in.script_sig = psbt_in.script_sig
-            # if the tx is segwit, set the witness as well
+            # Exercise 7: if the tx is segwit, set the witness as well
             if tx_obj.segwit:
-                # witness should be an empty Witness() if none
-                tx_in.witness = psbt_in.witness or Witness()
+                # witness should be the PSBTIn witness or an empty Witness()
+                raise NotImplementedError
         # check to see that the transaction verifies
         if not tx_obj.verify():
             raise RuntimeError('transaction invalid')
@@ -648,90 +718,80 @@ class PSBTIn:
         #  so that no full node is needed to look those up
         self.tx_in._value = prev_out.amount
         self.tx_in._script_pubkey = script_pubkey
-        # Exercise 12: if the ScriptPubKey is p2sh, see if we have the RedeemScript
+        # grab the RedeemScript
         if script_pubkey.is_p2sh():
-            redeem_script = redeem_lookup.get(script_pubkey.commands[1])
-            self.redeem_script = redeem_script
-        else:
-            redeem_script = None    
-        # if we have p2wpkh or p2sh-p2wpkh see if we have the appropriate NamedPublicKey
-        if script_pubkey.is_p2wpkh() or (redeem_script and redeem_script.is_p2wpkh()):
+            # see if we have a RedeemScript already defined or in the lookup
+            self.redeem_script = self.redeem_script or redeem_lookup.get(script_pubkey.commands[1])
+            # if there's no RedeemScript, we can't do any more updating, so return
+            if not self.redeem_script:
+                return
+        # Exercise 2: if we have p2wpkh or p2sh-p2wpkh see if we have the appropriate NamedPublicKey
+        if script_pubkey.is_p2wpkh() or (self.redeem_script and self.redeem_script.is_p2wpkh()):
+            # set the prev_out property as this is Segwit
             # for p2wpkh, the hash160 is the second command of the ScriptPubKey
             # for p2sh-p2wpkh, the hash160 is the second command of the RedeemScript
-            if script_pubkey.is_p2wpkh():
-                h160 = script_pubkey.commands[1]
-            else:
-                h160 = redeem_script.commands[1]
-            # set only the prev_out property, not prev_tx
-            self.prev_out = prev_out
             # see if we have the public key that corresponds to the hash160
-            hd_pub = pubkey_lookup.get(h160)
             # if so add it to the named_pubs dictionary
-            if hd_pub:
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
-        # if we have p2wsh or p2sh-p2wsh see if we have one or more NamedPublicKeys
-        elif script_pubkey.is_p2wsh() or (redeem_script and redeem_script.is_p2wsh()):
+            raise NotImplementedError
+        # Exercise 12: if we have p2wsh or p2sh-p2wsh see if we have one or more NamedPublicKeys
+        elif script_pubkey.is_p2wsh() or (self.redeem_script and self.redeem_script.is_p2wsh()):
+            # set the prev_out property as this is Segwit
             # for p2wsh, the sha256 is the second command of the ScriptPubKey
             # for p2sh-p2wsh, the sha256 is the second command of the RedeemScript
-            if script_pubkey.is_p2wsh():
-                s256 = script_pubkey.commands[1]
-            else:
-                s256 = redeem_script.commands[1]
-            # set only the prev_out property, not prev_tx
-            self.prev_out = prev_out
             # see if we have the WitnessScript that corresponds to the sha256
-            witness_script = witness_lookup.get(s256)
-            if witness_script:
-                self.witness_script = witness_script
                 # go through the commands of the WitnessScript for NamedPublicKeys
-                for command in witness_script.commands:
-                    hd_pub = pubkey_lookup.get(command)
-                    if hd_pub:
-                        self.named_pubs[hd_pub.sec()] = hd_pub.point
-        # Exercise 12: if we have p2sh that's not segwit, see if we have one or more NamedPublicKeys
-        elif redeem_script:
+            raise NotImplementedError
+        # we've eliminated p2sh wrapped segwit, handle p2sh here
+        elif script_pubkey.is_p2sh():
             # set the prev_tx property as it's not segwit
             self.prev_tx = prev_tx
             # go through the commands of the RedeemScript for NamedPublicKeys
-            for command in redeem_script.commands:
+            for command in self.redeem_script.commands:
                 # if we find a NamedPublicKey, add to the named_pubs dictionary
                 #  key is compressed sec, value is the point object
-                hd_pub = pubkey_lookup.get(command)
-                if hd_pub:
-                    self.named_pubs[hd_pub.sec()] = hd_pub.point
+                named_pub = pubkey_lookup.get(command)
+                if named_pub:
+                    self.named_pubs[named_pub.sec()] = named_pub.point
         # if we have p2pkh, see if we have the appropriate NamedPublicKey
         elif script_pubkey.is_p2pkh():
-            # Exercise 3
             # set the prev_tx property as it's not segwit
             self.prev_tx = prev_tx
             # look for the NamedPublicKey that corresponds to the hash160
             #  which is the 3rd command of the ScriptPubKey
-            hd_pub = pubkey_lookup.get(script_pubkey.commands[2])
-            if hd_pub:
+            named_pub = pubkey_lookup.get(script_pubkey.commands[2])
+            if named_pub:
                 # if it exists, add to the named_pubs dict
                 #  key is the sec and the value is the point
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
+                self.named_pubs[named_pub.sec()] = named_pub.point
+        # else we throw a ValueError
         else:
-            raise ValueError('cannot update a transaction because it is not p2pkh, p2sh, p2wpkh or p2wsh')
+            raise ValueError('cannot update a transaction because it is not p2pkh, p2sh, p2wpkh or p2wsh'.format(script_pubkey))
 
     def combine(self, other):
+        '''Combines two PSBTIn objects into self'''
+        # if prev_tx is defined in the other, but not in self, add
         if self.prev_tx is None and other.prev_tx:
             self.prev_tx = other.prev_tx
+        # if prev_tx is defined in the other, but not in self, add
         if self.prev_out is None and other.prev_out:
             self.prev_out = other.prev_out
-        for key, value in other.sigs.items():
-            if self.sigs.get(key) is None:
-                self.sigs[key] = value
+        # combine the sigs
+        self.sigs = {**self.sigs, **other.sigs}
+        # if hash_type is defined in the other, but not in self, add
         if self.hash_type is None and other.hash_type:
             self.hash_type = other.hash_type
+        # if redeem_script is defined in the other, but not in self, add
         if self.redeem_script is None and other.redeem_script:
             self.redeem_script = other.redeem_script
+        # if witness_script is defined in the other, but not in self, add
         if self.witness_script is None and other.witness_script:
             self.witness_script = other.witness_script
         # combine the pubs
         self.named_pubs = {**other.named_pubs, **self.named_pubs}
+        # if script_sig is defined in the other, but not in self, add
         if self.script_sig is None and other.script_sig:
             self.script_sig = other.script_sig
+        # if witness is defined in the other, but not in self, add
         if self.witness is None and other.witness:
             self.witness = other.witness
         # combine extra_map
@@ -742,50 +802,37 @@ class PSBTIn:
         sets the script_sig and witness fields'''
         # get the ScriptPubKey for this input
         script_pubkey = self.script_pubkey()
-        # Exercise 14: if the ScriptPubKey is p2sh, make sure there's a RedeemScript
+        # if the ScriptPubKey is p2sh
         if script_pubkey.is_p2sh():
-            redeem_script = self.redeem_script
-            if not redeem_script:
+            # make sure there's a RedeemScript
+            if not self.redeem_script:
                 raise RuntimeError('Cannot finalize p2sh without a RedeemScript')
-        else:
-            redeem_script = None
-        if script_pubkey.is_p2wpkh() or (redeem_script and redeem_script.is_p2wpkh()):
-            if len(self.sigs) == 0:
-                raise RuntimeError('Cannot finalize p2wpkh or p2sh-p2wpkh with 0 signatures')
-            elif len(self.sigs) > 1:
-                raise RuntimeError('Cannot finalize p2wpkh or p2sh-p2wpkh with more than 1 signature')
-            sec = list(self.sigs.keys())[0][1:]
-            sig = list(self.sigs.values())[0]
-            if redeem_script:
-                self.script_sig = Script([redeem_script.raw_serialize()])
-            else:
-                self.script_sig = Script()
-            self.witness = Witness([sig, sec])
-        elif script_pubkey.is_p2wsh() or (redeem_script and redeem_script.is_p2wsh()):
-            if not self.witness_script:
-                raise RuntimeError('Cannot finalize p2wsh or p2sh-p2wsh without a WitnessScript')
-            num_sigs = op_code_to_number(self.witness_script.commands[0])
-            if len(self.sigs) < num_sigs:
-                raise RuntimeError('Cannot finalize p2wsh or p2sh-p2wsh because {} sigs were provided where {} were needed'.format(len(self.sigs), num_sigs))
-            witness = Witness([b'\x00'])  # OP_CHECKMULTISIG bug
-            for command in self.witness_script.commands:
-                if type(command) == int:
-                    continue
-                sig = self.sigs.get(command)
-                if sig is not None:
-                    witness.items.append(sig)
-                if len(witness) - 1 >= num_sigs:
-                    break
-            if len(witness) - 1 < num_sigs:
-                raise RuntimeError('Not enough signatures provided for p2sh-p2wsh')
-            if redeem_script:
-                self.script_sig = Script([redeem_script.raw_serialize()])
-            else:
-                self.script_sig = Script()
-            witness.items.append(self.witness_script.raw_serialize())
-            self.witness = witness
-        # Exercise 14: If there's a RedeemScript
-        elif redeem_script:
+        # Exercise 6: if p2wpkh, Exercise 10: p2sh-p2wpkh
+        if script_pubkey.is_p2wpkh() or (self.redeem_script and self.redeem_script.is_p2wpkh()):
+            # check to see that we have exactly 1 signature
+            # the key of the sigs dict is the compressed SEC pubkey
+            # the value of the sigs dict is the signature
+            # Exercise 10: set the ScriptSig to the RedeemScript if there is one
+            # set the Witness to sig and sec
+            raise NotImplementedError
+        # Exercise 15: if p2wsh, Exercise 17: p2sh-p2wsh
+        elif script_pubkey.is_p2wsh() or (self.redeem_script and self.redeem_script.is_p2wsh()):
+            # make sure there's a WitnessScript
+            # convert the first command to a number (required # of sigs)
+            # make sure we have at least the number of sigs required
+            # create a list of items for the Witness. Start with b'\x00' for the
+            #  OP_CHECKMULTISIG off-by-one error
+            # for each command in the WitnessScript
+                # grab the sig for the pubkey
+                # if the sig exists, then add to the Witness item list
+                # when we have enough signatures, break
+            # make sure we have enough sigs to pass validation
+            # add the raw WitnessScript as the last item for p2wsh execution
+            # create the witness
+            # Exercise 17: set the ScriptSig to the RedeemScript if there is one
+            raise NotImplementedError
+        # we've eliminated p2sh wrapped segwit, handle p2sh here
+        elif script_pubkey.is_p2sh():
             # convert the first command to a number (required # of sigs)
             num_sigs = op_code_to_number(self.redeem_script.commands[0])
             # make sure we have at least the number of sigs required
@@ -815,7 +862,6 @@ class PSBTIn:
             # change the ScriptSig to be a Script with the commands we've gathered
             self.script_sig = Script(script_sig_commands)
         elif script_pubkey.is_p2pkh():
-            # Exercise 9: finalizing p2pkh
             # check to see that we have exactly 1 signature
             if len(self.sigs) != 1:
                 raise RuntimeError('P2pkh requires exactly 1 signature')
@@ -880,7 +926,7 @@ class PSBTOut:
             else:
                 s256 = script_pubkey.commands[1]
             if self.witness_script.sha256() != s256:
-                raise ValueError('WitnessScript sha256 and output sha256 do not match')
+                raise ValueError('WitnessScript sha256 and output sha256 do not match {} {}'.format(self, self.witness_script.sha256().hex()))
             for sec in self.named_pubs.keys():
                 try:
                     # this will raise a ValueError if it's not in there
@@ -936,7 +982,7 @@ class PSBTOut:
         if self.redeem_script:
             result += serialize_key_value(PSBT_OUT_REDEEM_SCRIPT, self.redeem_script.raw_serialize())
         if self.witness_script:
-            result += serialize_key_value(PSBT_OUT_REDEEM_SCRIPT, self.witness_script.serialize())
+            result += serialize_key_value(PSBT_OUT_WITNESS_SCRIPT, self.witness_script.raw_serialize())
         for key in sorted(self.named_pubs.keys()):
             named_pub = self.named_pubs[key]
             result += named_pub.serialize(PSBT_OUT_BIP32_DERIVATION)
@@ -952,59 +998,52 @@ class PSBTOut:
         correspond'''
         # get the ScriptPubKey
         script_pubkey = self.tx_out.script_pubkey
-        # Exercise 12: if the ScriptPubKey is p2sh, check for a RedeemScript
+        # if the ScriptPubKey is p2sh, check for a RedeemScript
         if script_pubkey.is_p2sh():
-            redeem_script = redeem_lookup.get(script_pubkey.commands[1])
-            self.redeem_script = redeem_script
-        else:
-            redeem_script = None
-        if script_pubkey.is_p2wpkh() or (redeem_script and redeem_script.is_p2wpkh()):
-            # p2wpkh/p2sh-p2wpkh
-            if redeem_script:
-                h160 = redeem_script.commands[1]
-            else:
-                h160 = script_pubkey.commands[1]
-            hd_pub = pubkey_lookup.get(h160)
-            if hd_pub:
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
-        elif script_pubkey.is_p2wsh() or (redeem_script and redeem_script.is_p2wsh()):
-            # p2wsh/p2sh-p2wsh
-            if redeem_script:
-                s256 = redeem_script.commands[1]
-            else:
-                s256 = script_pubkey.commands[1]
-            witness_script = witness_lookup.get(s256)
-            if witness_script:
-                self.witness_script = witness_script
-                for command in witness_script.commands:
-                    hd_pub = pubkey_lookup.get(command)
-                    if hd_pub:
-                        self.named_pubs[hd_pub.sec()] = hd_pub.point
-        elif redeem_script:
-            # p2sh
-            # Exercise 12: Look through the commands in the RedeemScript
-            #  for any NamedPublicKeys
-            for command in redeem_script.commands:
-                hd_pub = pubkey_lookup.get(command)
+            self.redeem_script = redeem_lookup.get(script_pubkey.commands[1])
+            # if no RedeemScript exists, we can't update, so return
+            if not self.redeem_script:
+                return
+        # Exercise 2: if p2wpkh or p2sh-p2wpkh
+        if script_pubkey.is_p2wpkh() or (self.redeem_script and self.redeem_script.is_p2wpkh()):
+            # get the hash160 (second command of RedeemScript or ScriptPubKey)
+            # look for the NamedPublicKey and add if there
+            raise NotImplementedError
+        # Exercise 12: if p2wsh/p2sh-p2wsh
+        elif script_pubkey.is_p2wsh() or (self.redeem_script and self.redeem_script.is_p2wsh()):
+            # get the sha256 (second command of RedeemScript or ScriptPubKey)
+            # look for the WitnessScript using the sha256
+                # update the WitnessScript
+                # look through the WitnessScript for any NamedPublicKeys
+                    # if found, add the NamedPublicKey
+            raise NotImplementedError
+        # we've eliminated p2sh wrapped segwit, handle p2sh here
+        elif script_pubkey.is_p2sh():
+            # Look through the commands in the RedeemScript for any NamedPublicKeys
+            for command in self.redeem_script.commands:
+                named_pub = pubkey_lookup.get(command)
                 # if a NamedPublicKey exists
-                if hd_pub:
+                if named_pub:
                     # add to the named_pubs dictionary
                     #  key is sec and the point is the value
-                    self.named_pubs[hd_pub.sec()] = hd_pub.point
+                    self.named_pubs[named_pub.sec()] = named_pub.point
+        # if the ScriptPubKey is p2pkh,
         elif script_pubkey.is_p2pkh():
-            # p2pkh
-            # Exercise 3: Look at the third command of p2pkh (hash160)
-            #  for the NamedPublicKey
-            hd_pub = pubkey_lookup.get(script_pubkey.commands[2])
+            # Look at the third command of the ScriptPubKey for the hash160
+            # Use that to look up the NamedPublicKey
+            named_pub = pubkey_lookup.get(script_pubkey.commands[2])
             # if a NamedPublicKey exists
-            if hd_pub:
+            if named_pub:
                 # add to the named_pubs dictionary
                 #  key is sec and the point is the value
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
+                self.named_pubs[named_pub.sec()] = named_pub.point
 
     def combine(self, other):
+        '''Combines two PSBTOuts to self'''
+        # if redeem_script is defined in the other, but not in self, add
         if self.redeem_script is None and other.redeem_script:
             self.redeem_script = other.redeem_script
+        # if witness_script is defined in the other, but not in self, add
         if self.witness_script is None and other.witness_script:
             self.witness_script = other.witness_script
         # combine the pubs
@@ -1037,17 +1076,11 @@ class PSBTTest(TestCase):
         want = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         self.assertEqual(psbt_obj.serialize().hex(), want)
 
-    def test_get_signing_raw_paths(self):
-        hex_psbt = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
-        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
-        raw_paths = psbt_obj.get_signing_raw_paths()
-        self.assertEqual(raw_paths, [bytes.fromhex('fbfef36f2c00008001000080000000800000000000000000')])
-
     def test_sign_p2pkh(self):
         hex_psbt = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
-        private_keys = [PrivateKey.parse('cP88EsR4DgJNeswxecL4sE4Eornf3q1ZoRxoCnk8y9eEkQyxu3D7')]
-        self.assertTrue(psbt_obj.sign(private_keys))
+        hd_priv = HDPrivateKey.parse('tprv8ZgxMBicQKsPeL2qb9uLkgTKhLHSUUHsxmr2fcGFRBVh6EiBrxHZNTagx3kDXN4yjHsYV5rUYZhpsLCrZYBXzWLWHA4xL3FcCF6CZz1LDGM')
+        self.assertTrue(psbt_obj.sign(hd_priv))
         want = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220202c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c483045022100b98bb5a69a081543e7e6de6b62b3243c8870211c679a8cf568916631494e99d50220631e1f70231286f059f5cdef8d746f7b8986cfec47346bdfea163528250d7d2401220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         self.assertEqual(psbt_obj.serialize().hex(), want)
 
@@ -1061,6 +1094,7 @@ class PSBTTest(TestCase):
     def test_final_tx(self):
         hex_psbt = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a227180001076b483045022100b98bb5a69a081543e7e6de6b62b3243c8870211c679a8cf568916631494e99d50220631e1f70231286f059f5cdef8d746f7b8986cfec47346bdfea163528250d7d24012102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c000000'
         psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.tx_obj.testnet = True
         tx_obj = psbt_obj.final_tx()
         want = '0100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f088748010000006b483045022100b98bb5a69a081543e7e6de6b62b3243c8870211c679a8cf568916631494e99d50220631e1f70231286f059f5cdef8d746f7b8986cfec47346bdfea163528250d7d24012102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77cffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000'
         self.assertEqual(tx_obj.serialize().hex(), want)
@@ -1078,13 +1112,158 @@ class PSBTTest(TestCase):
         hd_1 = NamedHDPublicKey.parse(key_1, stream_1)
         hd_2 = NamedHDPublicKey.parse(key_2, stream_2)
         pubkey_lookup = {**hd_1.bip44_lookup(), **hd_2.bip44_lookup()}
-        redeem_script_lookup = {}
+        redeem_lookup = {}
         for hex_redeem_script in hex_redeem_scripts:
             redeem_script = RedeemScript.parse(BytesIO(bytes.fromhex(hex_redeem_script)))
-            redeem_script_lookup[redeem_script.hash160()] = redeem_script
-        psbt_obj.update(tx_lookup, pubkey_lookup, redeem_script_lookup)
+            redeem_lookup[redeem_script.hash160()] = redeem_script
+        psbt_obj.update(tx_lookup, pubkey_lookup, redeem_lookup)
         want = '70736274ff01007501000000015c59ecb919792ecc26e031e9f4a6d4d74afce7b17dfe039002ef82b1f30bb63e0000000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f07000000000017a91481a19f39772bd741501e851e97ddd6a7f1ec194b8700000000000100fda201020000000001024b9f6ab9def1aabadd74f37c61361d4c555c08b3518b0f393e0df037a538058b010000001716001446fe25a61b6afad8e8619854ec65eaa5a3d707c2feffffff03df61643d0f37ca92b9e67d94d7acffb58bf167b3a73692ff2ca1933b51123f0100000017160014a77769eca770c1cafbcfa7bb06e44a7fc3748ef5feffffff0240420f000000000017a914c5bea2bad6a3171dff5fad0b99d2e60fca1d8bee87966f1b000000000017a914f10824ee9939fa638b9cc75e516408dc1d9fe248870247304402205c5f2ed7d4ce4da4913ee08b1413a7f0dadd8c59c6fe9c94fe299c8a7456076102203abb3b6f895938bf489a2473591877c7aa2cc7fddb1ca2e9632294b06d80f3a90121025ab592b2533bc8a4e4b3b52794b5f2318850c004b3dc24099271fb7db080ef820247304402204f57bbd3cc35c15bc7de0a8890c656d5608ab41c731c64413c45730fb0b05a5c0220162c676a55b2ff349cbea7d1908f034443419e30caf20a47beb5f209116cb0c3012102fed02d7c44b8bb82f23948e26e005572ff08fec43d6094daf67d2bc691f4d64d9f271800010447522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c000080010000800000008000000000000000000000010047522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
         self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_finalize_p2sh(self):
+        hex_psbt = '70736274ff0100530100000001e8be6d62ba1983b5d1c65406f87f7d73c2d7200d4075cf52589c53579870542b0000000000ffffffff01583e0f000000000017a91481a19f39772bd741501e851e97ddd6a7f1ec194b87000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c0000800100008000000080000100fd01010100000000010187a22bb77a836c0a3bbb62e1e04950cffdf6a45489a8d7801b24b18c124d84850100000000ffffffff0340420f000000000017a914c5bea2bad6a3171dff5fad0b99d2e60fca1d8bee8740420f00000000001976a914f0cd79383f13584bdeca184cecd16135b8a79fc288ac10c69b01000000001600146e13971913b9aa89659a9f53d327baa8826f2d750247304402204edcdf923bdddad9b77b17ae0c65817f032b7cb6efd95c0c4101fa48aba17e4e02202158c3a077a0ee0a7bc7e2763a9356470ae3aa4866ae4e62a6f8faa2729b02da0121031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e00000000220202c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c47304402207360ee58276e8135ae1efdf1bbd7b3d87d1c7f072f3141cfe8afa78f3e36cdf7022059462d2e4598e3b441fa2503eb73b6d6b644838d3c9af547f09760b0655ce9380122020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f2473044022038c818f86a2cb1e092c55f2e30c74904c4ebbf80805ba7235369b626444ff7a402202594d8fa4f855be4dbecc148804056c2938218e7fe1a7b805a0d18f2d47a31e801010447522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c0000800100008000000080000000000000000000010047522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.finalize()
+        want = '70736274ff0100530100000001e8be6d62ba1983b5d1c65406f87f7d73c2d7200d4075cf52589c53579870542b0000000000ffffffff01583e0f000000000017a91481a19f39772bd741501e851e97ddd6a7f1ec194b87000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c0000800100008000000080000100fd01010100000000010187a22bb77a836c0a3bbb62e1e04950cffdf6a45489a8d7801b24b18c124d84850100000000ffffffff0340420f000000000017a914c5bea2bad6a3171dff5fad0b99d2e60fca1d8bee8740420f00000000001976a914f0cd79383f13584bdeca184cecd16135b8a79fc288ac10c69b01000000001600146e13971913b9aa89659a9f53d327baa8826f2d750247304402204edcdf923bdddad9b77b17ae0c65817f032b7cb6efd95c0c4101fa48aba17e4e02202158c3a077a0ee0a7bc7e2763a9356470ae3aa4866ae4e62a6f8faa2729b02da0121031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e000000000107d90047304402207360ee58276e8135ae1efdf1bbd7b3d87d1c7f072f3141cfe8afa78f3e36cdf7022059462d2e4598e3b441fa2503eb73b6d6b644838d3c9af547f09760b0655ce93801473044022038c818f86a2cb1e092c55f2e30c74904c4ebbf80805ba7235369b626444ff7a402202594d8fa4f855be4dbecc148804056c2938218e7fe1a7b805a0d18f2d47a31e80147522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae00010047522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_update_p2wpkh(self):
+        hex_psbt = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef00000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.tx_obj.testnet = True
+        tx_lookup = psbt_obj.tx_obj.get_input_tx_lookup()
+        key = bytes.fromhex('02043587cf0398242fbc80000000959cb81379545d7a34287f41485a3c08fc6ecf66cb89caff8a4f618b484d6e7d0362f19f492715b6041723d97403f166da0e3246eb614d80635c036a8d2f753393')
+        stream = BytesIO(encode_varstr(bytes.fromhex('797dcdac') + serialize_binary_path("m/44'/1'/0'")))
+        hd = NamedHDPublicKey.parse(key, stream)
+        psbt_obj.update(tx_lookup, hd.bip44_lookup())
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc222060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_sign_p2wpkh(self):
+        hex_psbt = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc222060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        hd_priv = HDPrivateKey.parse('tprv8ZgxMBicQKsPeZ6mVBLfLQ7HTpmX8QWKrxbqAtk5BAiwEa9t5WjLryMZUo8qD6mNwGjx98NyDLqbqGcBKor6khRgnQG4XTbUPpxu8YdFKCF')
+        self.assertTrue(psbt_obj.sign(hd_priv))
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc222020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f24730440220575870ef714252a26bc4e61a6ee31db0f3896606a4792d11a42ef7d30c9f1b33022007cd28fb8618b704cbcf1cc6292d9be901bf3c99d967b0cace7307532619811e0122060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_finalize_p2wpkh(self):
+        hex_psbt = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc222020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f24730440220575870ef714252a26bc4e61a6ee31db0f3896606a4792d11a42ef7d30c9f1b33022007cd28fb8618b704cbcf1cc6292d9be901bf3c99d967b0cace7307532619811e0122060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.finalize()
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc201070001086b024730440220575870ef714252a26bc4e61a6ee31db0f3896606a4792d11a42ef7d30c9f1b33022007cd28fb8618b704cbcf1cc6292d9be901bf3c99d967b0cace7307532619811e01210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f2002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_final_tx_p2wpkh(self):
+        hex_psbt = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef000000000001011f40420f0000000000160014f0cd79383f13584bdeca184cecd16135b8a79fc201070001086b024730440220575870ef714252a26bc4e61a6ee31db0f3896606a4792d11a42ef7d30c9f1b33022007cd28fb8618b704cbcf1cc6292d9be901bf3c99d967b0cace7307532619811e01210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f2002202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c0000800100008000000080010000000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.tx_obj.testnet = True
+        tx_obj = psbt_obj.final_tx()
+        want = '010000000001015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060000000000ffffffff01583e0f000000000016001427459b7e4317d1c9e1d0f8320d557c6bb08731ef024730440220575870ef714252a26bc4e61a6ee31db0f3896606a4792d11a42ef7d30c9f1b33022007cd28fb8618b704cbcf1cc6292d9be901bf3c99d967b0cace7307532619811e01210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f200000000'
+        self.assertEqual(tx_obj.serialize().hex(), want)
+
+    def test_p2sh_p2wpkh(self):
+        hex_tx = '01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7500000000'
+        tx_obj = Tx.parse(BytesIO(bytes.fromhex(hex_tx)))
+        psbt_obj = PSBT.create(tx_obj)
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7500000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        psbt_obj.tx_obj.testnet = True
+        hex_named_hd = '4f01043587cf0398242fbc80000000959cb81379545d7a34287f41485a3c08fc6ecf66cb89caff8a4f618b484d6e7d0362f19f492715b6041723d97403f166da0e3246eb614d80635c036a8d2f75339310797dcdac2c0000800100008000000080'
+        stream = BytesIO(bytes.fromhex(hex_named_hd))
+        named_hd = NamedHDPublicKey.parse(read_varstr(stream), stream)
+        tx_lookup = psbt_obj.tx_obj.get_input_tx_lookup()
+        pubkey_lookup = named_hd.bip44_lookup()
+        redeem_lookup = named_hd.redeem_script_lookup()
+        psbt_obj.update(tx_lookup, pubkey_lookup, redeem_lookup)
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a914990dd86ae46c3d568535e5e482ac35151836d3cd870104160014f0cd79383f13584bdeca184cecd16135b8a79fc222060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c000080010000800000008000000000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        hd_priv = HDPrivateKey.parse('tprv8ZgxMBicQKsPeZ6mVBLfLQ7HTpmX8QWKrxbqAtk5BAiwEa9t5WjLryMZUo8qD6mNwGjx98NyDLqbqGcBKor6khRgnQG4XTbUPpxu8YdFKCF')
+        self.assertTrue(psbt_obj.sign(hd_priv))
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a914990dd86ae46c3d568535e5e482ac35151836d3cd8722020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f2483045022100f332008498ada0d5c83717c638b6d9f2bc6b79e657ab1db0bd45538e1390905202203060d6ffa36bb49b3469ea806a03644958926d56dda96701e7eaa3ca5320c49f010104160014f0cd79383f13584bdeca184cecd16135b8a79fc222060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c000080010000800000008000000000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        psbt_obj.finalize()
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a914990dd86ae46c3d568535e5e482ac35151836d3cd87010717160014f0cd79383f13584bdeca184cecd16135b8a79fc201086c02483045022100f332008498ada0d5c83717c638b6d9f2bc6b79e657ab1db0bd45538e1390905202203060d6ffa36bb49b3469ea806a03644958926d56dda96701e7eaa3ca5320c49f01210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f20000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        tx_obj = psbt_obj.final_tx()
+        want = '010000000001015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060100000017160014f0cd79383f13584bdeca184cecd16135b8a79fc2ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7502483045022100f332008498ada0d5c83717c638b6d9f2bc6b79e657ab1db0bd45538e1390905202203060d6ffa36bb49b3469ea806a03644958926d56dda96701e7eaa3ca5320c49f01210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f200000000'
+        self.assertEqual(tx_obj.serialize().hex(), want)
+
+    def test_update_p2wsh(self):
+        hex_psbt = '70736274ff01005e01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060200000000ffffffff01583e0f0000000000220020878ce58b26789632a24ec6b62542e5d4e844dee56a7ddce7db41618049c3928c000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c0000800100008000000080000000'
+        hex_witness_scripts = ['47522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae', '47522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae']
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.tx_obj.testnet = True
+        tx_lookup = psbt_obj.tx_obj.get_input_tx_lookup()
+        key_1 = bytes.fromhex('02043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af')
+        key_2 = bytes.fromhex('02043587cf0398242fbc80000000959cb81379545d7a34287f41485a3c08fc6ecf66cb89caff8a4f618b484d6e7d0362f19f492715b6041723d97403f166da0e3246eb614d80635c036a8d2f753393')
+        bin_path = serialize_binary_path("m/44'/1'/0'")
+        stream_1 = BytesIO(encode_varstr(bytes.fromhex('fbfef36f') + bin_path))
+        stream_2 = BytesIO(encode_varstr(bytes.fromhex('797dcdac') + bin_path))
+        hd_1 = NamedHDPublicKey.parse(key_1, stream_1)
+        hd_2 = NamedHDPublicKey.parse(key_2, stream_2)
+        pubkey_lookup = {**hd_1.bip44_lookup(), **hd_2.bip44_lookup()}
+        witness_lookup = {}
+        for hex_witness_script in hex_witness_scripts:
+            witness_script = WitnessScript.parse(BytesIO(bytes.fromhex(hex_witness_script)))
+            witness_lookup[witness_script.sha256()] = witness_script
+        psbt_obj.update(tx_lookup, pubkey_lookup, witness_lookup=witness_lookup)
+        want = '70736274ff01005e01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060200000000ffffffff01583e0f0000000000220020878ce58b26789632a24ec6b62542e5d4e844dee56a7ddce7db41618049c3928c000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c00008001000080000000800001012b40420f0000000000220020c1b4fff485af1ac26714340af2e13d2e89ad70389332a0756d91a123c7fe7f5d010547522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c0000800100008000000080000000000000000000010147522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_finalize_p2wsh(self):
+        hex_psbt = '70736274ff01005e01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060200000000ffffffff01583e0f0000000000220020878ce58b26789632a24ec6b62542e5d4e844dee56a7ddce7db41618049c3928c000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c00008001000080000000800001012b40420f0000000000220020c1b4fff485af1ac26714340af2e13d2e89ad70389332a0756d91a123c7fe7f5d220202c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c47304402203f26a975aae04a7ae12c964cdcea318c850351a3072aebbab7902e89957008ea022019f895271f70d1515f9da776d6ac17c21bcbca769d87c1beb4ebbf4c7a56fbc20122020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f247304402204fd654c27002d4c9e53bb001229e3d7587e5be245a81b6f7ead3bf136643af40022060ebf1193a6b3e82615a564f0043e5ae88e661bfdb7fd254c9a30bae8160583901010547522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c0000800100008000000080000000000000000000010147522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
+        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
+        psbt_obj.finalize()
+        want = '70736274ff01005e01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060200000000ffffffff01583e0f0000000000220020878ce58b26789632a24ec6b62542e5d4e844dee56a7ddce7db41618049c3928c000000004f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c00008001000080000000800001012b40420f0000000000220020c1b4fff485af1ac26714340af2e13d2e89ad70389332a0756d91a123c7fe7f5d0107000108da040047304402203f26a975aae04a7ae12c964cdcea318c850351a3072aebbab7902e89957008ea022019f895271f70d1515f9da776d6ac17c21bcbca769d87c1beb4ebbf4c7a56fbc20147304402204fd654c27002d4c9e53bb001229e3d7587e5be245a81b6f7ead3bf136643af40022060ebf1193a6b3e82615a564f0043e5ae88e661bfdb7fd254c9a30bae816058390147522102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f252ae00010147522102db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29021026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d52ae2202026421c7673552fdad57193e102df96134be00649195b213fec9d07c6d918f418d18797dcdac2c00008001000080000000800100000000000000220202db8b701c3210e1bf6f2a8a9a657acad18be1e8bff3f7435d48f973de8408f29018fbfef36f2c0000800100008000000080010000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+
+    def test_p2sh_p2wsh(self):
+        hex_tx = '01000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7500000000'
+        tx_obj = Tx.parse(BytesIO(bytes.fromhex(hex_tx)))
+        psbt_obj = PSBT.create(tx_obj)
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d7500000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        psbt_obj.tx_obj.testnet = True
+        hex_witness_scripts = ['69532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae']
+        hex_named_hd = '4f01043587cf0398242fbc80000000959cb81379545d7a34287f41485a3c08fc6ecf66cb89caff8a4f618b484d6e7d0362f19f492715b6041723d97403f166da0e3246eb614d80635c036a8d2f75339310797dcdac2c0000800100008000000080'
+        stream = BytesIO(bytes.fromhex(hex_named_hd))
+        named_hd = NamedHDPublicKey.parse(read_varstr(stream), stream)
+        tx_lookup = psbt_obj.tx_obj.get_input_tx_lookup()
+        pubkey_lookup = named_hd.bip44_lookup()
+        redeem_lookup = {}
+        witness_lookup = {}
+        for hex_witness_script in hex_witness_scripts:
+            witness_script = WitnessScript.parse(BytesIO(bytes.fromhex(hex_witness_script)))
+            witness_lookup[witness_script.sha256()] = witness_script
+            redeem_script = RedeemScript([0, witness_script.sha256()])
+            redeem_lookup[redeem_script.hash160()] = redeem_script
+        psbt_obj.update(tx_lookup, pubkey_lookup, redeem_lookup, witness_lookup)
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a91423358e259fbcf478331138ceb9619d9a8c8350738701042200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef38010569532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c000080010000800000008000000000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        hd_priv = HDPrivateKey.parse('tprv8ZgxMBicQKsPeZ6mVBLfLQ7HTpmX8QWKrxbqAtk5BAiwEa9t5WjLryMZUo8qD6mNwGjx98NyDLqbqGcBKor6khRgnQG4XTbUPpxu8YdFKCF')
+        self.assertTrue(psbt_obj.sign(hd_priv))
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a91423358e259fbcf478331138ceb9619d9a8c8350738722020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f24830450221009b79ecffc98bf334ed4e2a1dddb6e18ce1aa54cb3c19d2d4b41b9ee3f87ae1b3022013f67f2e7caeb8a13463a954e054b04ddd7fbef94b77c4cd1fe32658ed5909590101042200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef38010569532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c000080010000800000008000000000000000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        hex_named_hd = '4f01043587cf034d513c1580000000fb406c9fec09b6957a3449d2102318717b0c0d230b657d0ebc6698abd52145eb02eaf3397fea02c5dac747888a9e535eaf3c7e7cb9d5f2da77ddbdd943592a14af10fbfef36f2c0000800100008000000080'
+        stream = BytesIO(bytes.fromhex(hex_named_hd))
+        named_hd = NamedHDPublicKey.parse(read_varstr(stream), stream)
+        psbt_obj.update({}, named_hd.bip44_lookup())
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a91423358e259fbcf478331138ceb9619d9a8c8350738722020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f24830450221009b79ecffc98bf334ed4e2a1dddb6e18ce1aa54cb3c19d2d4b41b9ee3f87ae1b3022013f67f2e7caeb8a13463a954e054b04ddd7fbef94b77c4cd1fe32658ed5909590101042200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef38010569532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c000080010000800000008000000000000000002206031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b18fbfef36f2c000080010000800000008000000000010000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        private_keys = [
+            PrivateKey.parse('cP88EsR4DgJNeswxecL4sE4Eornf3q1ZoRxoCnk8y9eEkQyxu3D7'),
+            PrivateKey.parse('cP9BYGBfMbhsN5Lvyza3otuC14oKjqHbgbRXhm7QCF47EgYWQb6S'),
+        ]
+        self.assertTrue(psbt_obj.sign_with_private_keys(private_keys))
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a91423358e259fbcf478331138ceb9619d9a8c83507387220202c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c47304402206c79809b2534d3c3ebb9f57958c3e1e24c523c33a47bea9d64e3201622dd194d02206042cc6138b85b865493d5d8cce419d5536112060c9fa73d36244bf2df555600012202031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b473044022077adf39dc6639cfa63bee2a05c07facf682009f87af6382c84b00f18b15ae4d602207588712aaf8c9f381273fe7985af86955ac3a090c4a87a37995eb6a7cb8023c90122020247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f24830450221009b79ecffc98bf334ed4e2a1dddb6e18ce1aa54cb3c19d2d4b41b9ee3f87ae1b3022013f67f2e7caeb8a13463a954e054b04ddd7fbef94b77c4cd1fe32658ed5909590101042200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef38010569532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae22060247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f218797dcdac2c00008001000080000000800000000000000000220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c000080010000800000008000000000000000002206031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b18fbfef36f2c000080010000800000008000000000010000000000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        psbt_obj.finalize()
+        want = '70736274ff01005201000000015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f9060300000000ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75000000000001012040420f000000000017a91423358e259fbcf478331138ceb9619d9a8c835073870107232200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef380108fd4501050047304402206c79809b2534d3c3ebb9f57958c3e1e24c523c33a47bea9d64e3201622dd194d02206042cc6138b85b865493d5d8cce419d5536112060c9fa73d36244bf2df55560001473044022077adf39dc6639cfa63bee2a05c07facf682009f87af6382c84b00f18b15ae4d602207588712aaf8c9f381273fe7985af86955ac3a090c4a87a37995eb6a7cb8023c9014830450221009b79ecffc98bf334ed4e2a1dddb6e18ce1aa54cb3c19d2d4b41b9ee3f87ae1b3022013f67f2e7caeb8a13463a954e054b04ddd7fbef94b77c4cd1fe32658ed5909590169532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae0000'
+        self.assertEqual(psbt_obj.serialize().hex(), want)
+        tx_obj = psbt_obj.final_tx()
+        want = '010000000001015c89191dc2abf62339e0f114cb4c3bf8fb399d522d112c9afa2dc7a43759f90603000000232200207fcc2ca7381db4bdfd02e1f2b5eb3d72435b8e09bdbd8bfe3d748bf19d78ef38ffffffff01583e0f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d75050047304402206c79809b2534d3c3ebb9f57958c3e1e24c523c33a47bea9d64e3201622dd194d02206042cc6138b85b865493d5d8cce419d5536112060c9fa73d36244bf2df55560001473044022077adf39dc6639cfa63bee2a05c07facf682009f87af6382c84b00f18b15ae4d602207588712aaf8c9f381273fe7985af86955ac3a090c4a87a37995eb6a7cb8023c9014830450221009b79ecffc98bf334ed4e2a1dddb6e18ce1aa54cb3c19d2d4b41b9ee3f87ae1b3022013f67f2e7caeb8a13463a954e054b04ddd7fbef94b77c4cd1fe32658ed5909590169532102c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c21031b31547c895b5e301206740ea9890a0d6d127baeebb7fffb07356527323c915b210247aed77c3def4b8ce74a8db08d7f5fd315f8d96b6cd801729a910c3045d750f253ae00000000'
+        self.assertEqual(tx_obj.serialize().hex(), want)
 
     def test_errors(self):
         tests = [
@@ -1182,7 +1361,7 @@ class PSBTTest(TestCase):
             hd_priv.traverse("m/0'/0'/0'").private_key,
             hd_priv.traverse("m/0'/0'/2'").private_key,
         ]
-        psbt.sign(private_keys)
+        psbt.sign_with_private_keys(private_keys)
         self.assertTrue(psbt.validate())
         want = 'cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgf0cwRAIgdAGK1BgAl7hzMjwAFXILNoTMgSOJEEjn282bVa1nnJkCIHPTabdA4+tT3O+jOCPIBwUUylWn3ZVE8VfBZ5EyYRGMAQEDBAEAAAABBEdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSriIGApWDvzmuCmCXR60Zmt3WNPphCFWdbFzTm0whg/GrluB/ENkMak8AAACAAAAAgAAAAIAiBgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU21xDZDGpPAAAAgAAAAIABAACAAAEBIADC6wsAAAAAF6kUt/X69A49QKWkWbHbNTXyty+pIeiHIgIDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtxHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwEBAwQBAAAAAQQiACCMI1MXN0O1ld+0oHtyuo5C43l9p06H/n2ddJfjsgKJAwEFR1IhAwidwQx6xttU+RMpr2FzM9s4jOrQwjH3IzedG5kDCwLcIQI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8Oc1KuIgYCOt2QTz1tz1nduQaw3uI1Kbf/ue1Q5ehhUZJoYCIfDnMQ2QxqTwAAAIAAAACAAwAAgCIGAwidwQx6xttU+RMpr2FzM9s4jOrQwjH3IzedG5kDCwLcENkMak8AAACAAAAAgAIAAIAAIgIDqaTDf1mW06ol26xrVwrwZQOUSSlCRgs1R1Ptnuylh3EQ2QxqTwAAAIAAAACABAAAgAAiAgJ/Y5l1fS7/VaE2rQLGhLGDi2VW5fG2s0KCqUtrUAUQlhDZDGpPAAAAgAAAAIAFAACAAA=='
         self.assertEqual(psbt.serialize_base64(), want)
@@ -1194,12 +1373,12 @@ class PSBTTest(TestCase):
             hd_priv.traverse("m/0'/0'/1'").private_key,
             hd_priv.traverse("m/0'/0'/3'").private_key,
         ]
-        psbt.sign(private_keys)
+        psbt.sign_with_private_keys(private_keys)
         self.assertTrue(psbt.validate())
         want = 'cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU210gwRQIhAPYQOLMI3B2oZaNIUnRvAVdyk0IIxtJEVDk82ZvfIhd3AiAFbmdaZ1ptCgK4WxTl4pB02KJam1dgvqKBb2YZEKAG6gEBAwQBAAAAAQRHUiEClYO/Oa4KYJdHrRma3dY0+mEIVZ1sXNObTCGD8auW4H8hAtq2H/SaFNtqfQKwzR+7ePxLGDErW05U2uTbovv+9TbXUq4iBgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfxDZDGpPAAAAgAAAAIAAAACAIgYC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtcQ2QxqTwAAAIAAAACAAQAAgAABASAAwusLAAAAABepFLf1+vQOPUClpFmx2zU18rcvqSHohyICAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zRzBEAiBl9FulmYtZon/+GnvtAWrx8fkNVLOqj3RQql9WolEDvQIgf3JHA60e25ZoCyhLVtT/y4j3+3Weq74IqjDym4UTg9IBAQMEAQAAAAEEIgAgjCNTFzdDtZXftKB7crqOQuN5fadOh/59nXSX47ICiQMBBUdSIQMIncEMesbbVPkTKa9hczPbOIzq0MIx9yM3nRuZAwsC3CECOt2QTz1tz1nduQaw3uI1Kbf/ue1Q5ehhUZJoYCIfDnNSriIGAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zENkMak8AAACAAAAAgAMAAIAiBgMIncEMesbbVPkTKa9hczPbOIzq0MIx9yM3nRuZAwsC3BDZDGpPAAAAgAAAAIACAACAACICA6mkw39ZltOqJdusa1cK8GUDlEkpQkYLNUdT7Z7spYdxENkMak8AAACAAAAAgAQAAIAAIgICf2OZdX0u/1WhNq0CxoSxg4tlVuXxtrNCgqlLa1AFEJYQ2QxqTwAAAIAAAACABQAAgAA='
         self.assertEqual(psbt.serialize_base64(), want)
 
-    def test_combine_1(self):
+    def test_combine(self):
         psbt_1 = PSBT.parse_base64('cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgf0cwRAIgdAGK1BgAl7hzMjwAFXILNoTMgSOJEEjn282bVa1nnJkCIHPTabdA4+tT3O+jOCPIBwUUylWn3ZVE8VfBZ5EyYRGMAQEDBAEAAAABBEdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSriIGApWDvzmuCmCXR60Zmt3WNPphCFWdbFzTm0whg/GrluB/ENkMak8AAACAAAAAgAAAAIAiBgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU21xDZDGpPAAAAgAAAAIABAACAAAEBIADC6wsAAAAAF6kUt/X69A49QKWkWbHbNTXyty+pIeiHIgIDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtxHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwEBAwQBAAAAAQQiACCMI1MXN0O1ld+0oHtyuo5C43l9p06H/n2ddJfjsgKJAwEFR1IhAwidwQx6xttU+RMpr2FzM9s4jOrQwjH3IzedG5kDCwLcIQI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8Oc1KuIgYCOt2QTz1tz1nduQaw3uI1Kbf/ue1Q5ehhUZJoYCIfDnMQ2QxqTwAAAIAAAACAAwAAgCIGAwidwQx6xttU+RMpr2FzM9s4jOrQwjH3IzedG5kDCwLcENkMak8AAACAAAAAgAIAAIAAIgIDqaTDf1mW06ol26xrVwrwZQOUSSlCRgs1R1Ptnuylh3EQ2QxqTwAAAIAAAACABAAAgAAiAgJ/Y5l1fS7/VaE2rQLGhLGDi2VW5fG2s0KCqUtrUAUQlhDZDGpPAAAAgAAAAIAFAACAAA==')
         psbt_2 = PSBT.parse_base64('cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU210gwRQIhAPYQOLMI3B2oZaNIUnRvAVdyk0IIxtJEVDk82ZvfIhd3AiAFbmdaZ1ptCgK4WxTl4pB02KJam1dgvqKBb2YZEKAG6gEBAwQBAAAAAQRHUiEClYO/Oa4KYJdHrRma3dY0+mEIVZ1sXNObTCGD8auW4H8hAtq2H/SaFNtqfQKwzR+7ePxLGDErW05U2uTbovv+9TbXUq4iBgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfxDZDGpPAAAAgAAAAIAAAACAIgYC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtcQ2QxqTwAAAIAAAACAAQAAgAABASAAwusLAAAAABepFLf1+vQOPUClpFmx2zU18rcvqSHohyICAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zRzBEAiBl9FulmYtZon/+GnvtAWrx8fkNVLOqj3RQql9WolEDvQIgf3JHA60e25ZoCyhLVtT/y4j3+3Weq74IqjDym4UTg9IBAQMEAQAAAAEEIgAgjCNTFzdDtZXftKB7crqOQuN5fadOh/59nXSX47ICiQMBBUdSIQMIncEMesbbVPkTKa9hczPbOIzq0MIx9yM3nRuZAwsC3CECOt2QTz1tz1nduQaw3uI1Kbf/ue1Q5ehhUZJoYCIfDnNSriIGAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zENkMak8AAACAAAAAgAMAAIAiBgMIncEMesbbVPkTKa9hczPbOIzq0MIx9yM3nRuZAwsC3BDZDGpPAAAAgAAAAIACAACAACICA6mkw39ZltOqJdusa1cK8GUDlEkpQkYLNUdT7Z7spYdxENkMak8AAACAAAAAgAQAAIAAIgICf2OZdX0u/1WhNq0CxoSxg4tlVuXxtrNCgqlLa1AFEJYQ2QxqTwAAAIAAAACABQAAgAA=')
         psbt_1.combine(psbt_2)
@@ -1207,14 +1386,14 @@ class PSBTTest(TestCase):
         want = 'cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgf0cwRAIgdAGK1BgAl7hzMjwAFXILNoTMgSOJEEjn282bVa1nnJkCIHPTabdA4+tT3O+jOCPIBwUUylWn3ZVE8VfBZ5EyYRGMASICAtq2H/SaFNtqfQKwzR+7ePxLGDErW05U2uTbovv+9TbXSDBFAiEA9hA4swjcHahlo0hSdG8BV3KTQgjG0kRUOTzZm98iF3cCIAVuZ1pnWm0KArhbFOXikHTYolqbV2C+ooFvZhkQoAbqAQEDBAEAAAABBEdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSriIGApWDvzmuCmCXR60Zmt3WNPphCFWdbFzTm0whg/GrluB/ENkMak8AAACAAAAAgAAAAIAiBgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU21xDZDGpPAAAAgAAAAIABAACAAAEBIADC6wsAAAAAF6kUt/X69A49QKWkWbHbNTXyty+pIeiHIgIDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtxHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwEiAgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8Oc0cwRAIgZfRbpZmLWaJ//hp77QFq8fH5DVSzqo90UKpfVqJRA70CIH9yRwOtHtuWaAsoS1bU/8uI9/t1nqu+CKow8puFE4PSAQEDBAEAAAABBCIAIIwjUxc3Q7WV37Sge3K6jkLjeX2nTof+fZ10l+OyAokDAQVHUiEDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwhAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zUq4iBgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8OcxDZDGpPAAAAgAAAAIADAACAIgYDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwQ2QxqTwAAAIAAAACAAgAAgAAiAgOppMN/WZbTqiXbrGtXCvBlA5RJKUJGCzVHU+2e7KWHcRDZDGpPAAAAgAAAAIAEAACAACICAn9jmXV9Lv9VoTatAsaEsYOLZVbl8bazQoKpS2tQBRCWENkMak8AAACAAAAAgAUAAIAA'
         self.assertEqual(psbt_1.serialize_base64(), want)
 
-    def test_combine_2(self):
+    def test_combine_extra(self):
         psbt_1 = PSBT.parse_base64('cHNidP8BAD8CAAAAAf//////////////////////////////////////////AAAAAAD/////AQAAAAAAAAAAA2oBAAAAAAAKDwECAwQFBgcICQ8BAgMEBQYHCAkKCwwNDg8ACg8BAgMEBQYHCAkPAQIDBAUGBwgJCgsMDQ4PAAoPAQIDBAUGBwgJDwECAwQFBgcICQoLDA0ODwA=')
         psbt_2 = PSBT.parse_base64('cHNidP8BAD8CAAAAAf//////////////////////////////////////////AAAAAAD/////AQAAAAAAAAAAA2oBAAAAAAAKDwECAwQFBgcIEA8BAgMEBQYHCAkKCwwNDg8ACg8BAgMEBQYHCBAPAQIDBAUGBwgJCgsMDQ4PAAoPAQIDBAUGBwgQDwECAwQFBgcICQoLDA0ODwA=')
         psbt_1.combine(psbt_2)
         self.assertTrue(psbt_1.validate())
         want = 'cHNidP8BAD8CAAAAAf//////////////////////////////////////////AAAAAAD/////AQAAAAAAAAAAA2oBAAAAAAAKDwECAwQFBgcICQ8BAgMEBQYHCAkKCwwNDg8KDwECAwQFBgcIEA8BAgMEBQYHCAkKCwwNDg8ACg8BAgMEBQYHCAkPAQIDBAUGBwgJCgsMDQ4PCg8BAgMEBQYHCBAPAQIDBAUGBwgJCgsMDQ4PAAoPAQIDBAUGBwgJDwECAwQFBgcICQoLDA0ODwoPAQIDBAUGBwgQDwECAwQFBgcICQoLDA0ODwA='
         self.assertEqual(psbt_1.serialize_base64(), want)
-        
+
     def test_finalize(self):
         psbt = PSBT.parse_base64('cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgf0cwRAIgdAGK1BgAl7hzMjwAFXILNoTMgSOJEEjn282bVa1nnJkCIHPTabdA4+tT3O+jOCPIBwUUylWn3ZVE8VfBZ5EyYRGMASICAtq2H/SaFNtqfQKwzR+7ePxLGDErW05U2uTbovv+9TbXSDBFAiEA9hA4swjcHahlo0hSdG8BV3KTQgjG0kRUOTzZm98iF3cCIAVuZ1pnWm0KArhbFOXikHTYolqbV2C+ooFvZhkQoAbqAQEDBAEAAAABBEdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSriIGApWDvzmuCmCXR60Zmt3WNPphCFWdbFzTm0whg/GrluB/ENkMak8AAACAAAAAgAAAAIAiBgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU21xDZDGpPAAAAgAAAAIABAACAAAEBIADC6wsAAAAAF6kUt/X69A49QKWkWbHbNTXyty+pIeiHIgIDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtxHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwEiAgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8Oc0cwRAIgZfRbpZmLWaJ//hp77QFq8fH5DVSzqo90UKpfVqJRA70CIH9yRwOtHtuWaAsoS1bU/8uI9/t1nqu+CKow8puFE4PSAQEDBAEAAAABBCIAIIwjUxc3Q7WV37Sge3K6jkLjeX2nTof+fZ10l+OyAokDAQVHUiEDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwhAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zUq4iBgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8OcxDZDGpPAAAAgAAAAIADAACAIgYDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwQ2QxqTwAAAIAAAACAAgAAgAAiAgOppMN/WZbTqiXbrGtXCvBlA5RJKUJGCzVHU+2e7KWHcRDZDGpPAAAAgAAAAIAEAACAACICAn9jmXV9Lv9VoTatAsaEsYOLZVbl8bazQoKpS2tQBRCWENkMak8AAACAAAAAgAUAAIAA')
         psbt.finalize()

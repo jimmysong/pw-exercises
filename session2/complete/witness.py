@@ -11,6 +11,12 @@ class Witness:
     def __init__(self, items=None):
         self.items = items or []
 
+    def __repr__(self):
+        result = ''
+        for item in self.items:
+            result += '{} '.format(item.hex())
+        return result
+
     @classmethod
     def parse(cls, s):
         num_items = read_varint(s)

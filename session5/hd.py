@@ -10,12 +10,7 @@ from helper import (
     hmac_sha512_kdf,
     int_to_big_endian,
     int_to_byte,
-    int_to_little_endian,
-    little_endian_to_int,
-    parse_binary_path,
     raw_decode_base58,
-    read_varstr,
-    serialize_key_value,
     sha256,
 )
 from mnemonic import secure_mnemonic, WORD_LOOKUP, WORD_LIST
@@ -119,7 +114,7 @@ class HDPrivateKey:
         chain_code = h[32:]
         # depth is whatever the current depth + 1
         depth = self.depth + 1
-        # parent_fingerprint is the HDPublicKey's hash160's first 4 bytes
+        # parent_fingerprint is the fingerprint of this node
         parent_fingerprint = self.fingerprint()
         # child number is the index
         child_number = index
@@ -200,8 +195,8 @@ class HDPrivateKey:
 
     # passthrough methods
     def fingerprint(self):
-        return self.private_key.point.hash160()[:4]
-    
+        return self.pub.fingerprint()
+
     def xpub(self):
         return self.pub.xpub()
 
@@ -250,6 +245,7 @@ class HDPrivateKey:
             raise ValueError('private key should be preceded by a zero byte')
         # last 32 bytes should be the private key in big endian
         private_key = PrivateKey(secret=big_endian_to_int(s.read(32)))
+        # return an instance of the class
         return cls(
             private_key=private_key,
             chain_code=chain_code,
@@ -258,7 +254,6 @@ class HDPrivateKey:
             child_number=child_number,
             testnet=testnet,
         )
-
 
     def _get_address(self, purpose, account=0, external=True, address=0):
         '''Returns the proper address among purposes 44', 49' and 84'.
@@ -356,24 +351,6 @@ class HDPrivateKey:
         # return the HDPrivateKey at the path specified
         return cls.from_seed(seed, testnet=testnet).traverse(path)
 
-    def get_private_keys(self, raw_paths):
-        '''Returns a list of private keys that correspond to the raw paths'''
-        # start a list of private keys
-        private_keys = []
-        # iterate through the raw paths
-        for raw_path in raw_paths:
-            # check that this key has the right fingerprint
-            if raw_path[:4] != self.fingerprint():
-                continue
-            # the rest of the raw path is the binary path. Parse it.
-            path = parse_binary_path(raw_path[4:])
-            # traverse the path
-            hd_priv = self.traverse(path)
-            # add the private key to the list
-            private_keys.append(hd_priv.private_key)
-        # return the list of private keys
-        return private_keys
-
 
 class HDPublicKey:
 
@@ -389,7 +366,7 @@ class HDPublicKey:
 
     def __repr__(self):
         return self.xpub()
-        
+
     def sec(self):
         return self.point.sec()
 
@@ -399,7 +376,7 @@ class HDPublicKey:
     def fingerprint(self):
         '''Fingerprint is the hash160's first 4 bytes'''
         return self.hash160()[:4]
-    
+
     def address(self):
         return self.point.address(testnet=self.testnet)
 
@@ -427,7 +404,7 @@ class HDPublicKey:
         chain_code = h[32:]
         # depth is current depth + 1
         depth = self.depth + 1
-        # parent_fingerprint is the hash160's first 4 bytes
+        # parent_fingerprint is the fingerprint of this node
         parent_fingerprint = self.fingerprint()
         # child number is the index
         child_number = index
@@ -466,7 +443,7 @@ class HDPublicKey:
                 version = MAINNET_XPUB
             self._raw = self._serialize(version)
         return self._raw
-    
+
     def _serialize(self, version):
         # start with the version
         raw = version
@@ -485,7 +462,7 @@ class HDPublicKey:
     def _pub(self, version):
         '''Returns the base58-encoded x/y/z pub.
         Expects a 4-byte version.'''
-        # version + depth + parent_fingerprint + child number + chain code + private key
+        # get the serialization
         raw = self._serialize(version)
         # base58-encode the whole thing
         return encode_base58_checksum(raw)
@@ -895,14 +872,3 @@ class HDTest(TestCase):
         with self.assertRaises(ValueError):
             mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon'
             HDPrivateKey.from_mnemonic(mnemonic)
-
-    def test_get_private_keys(self):
-        raw_paths = [bytes.fromhex('fbfef36f2c00008001000080000000800000000000000000'),
-                     bytes.fromhex('fbfef36f2c00008001000080000000800100000000000000')]
-        mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-        passphrase = b'jimmy@programmingblockchain.com Jimmy Song'
-        path = "m/44'/1'/0'"
-        hd_priv = HDPrivateKey.from_mnemonic(mnemonic, passphrase, testnet=True)
-        private_keys = hd_priv.get_private_keys(raw_paths)
-        self.assertEqual(private_keys[0].wif(), 'cP88EsR4DgJNeswxecL4sE4Eornf3q1ZoRxoCnk8y9eEkQyxu3D7')
-        self.assertEqual(private_keys[1].wif(), 'cVtPxHBKyuKvjGhmEx3WjgfEy5ya1pgpGUPA5qnpg7i6bGyAHjsJ')

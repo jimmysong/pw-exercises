@@ -10,7 +10,6 @@ from helper import (
     hmac_sha512_kdf,
     int_to_big_endian,
     int_to_byte,
-    parse_binary_path,
     raw_decode_base58,
     sha256,
 )
@@ -351,24 +350,6 @@ class HDPrivateKey:
         seed = hmac_sha512_kdf(normalized_mnemonic, salt)
         # return the HDPrivateKey at the path specified
         return cls.from_seed(seed, testnet=testnet).traverse(path)
-
-    def get_private_keys(self, raw_paths):
-        '''Returns a list of private keys that correspond to the raw paths'''
-        # start a list of private keys
-        private_keys = []
-        # iterate through the raw paths
-        for raw_path in raw_paths:
-            # check that this key has the right fingerprint
-            if raw_path[:4] != self.fingerprint():
-                continue
-            # the rest of the raw path is the binary path. Parse it.
-            path = parse_binary_path(raw_path[4:])
-            # traverse the path
-            hd_priv = self.traverse(path)
-            # add the private key to the list
-            private_keys.append(hd_priv.private_key)
-        # return the list of private keys
-        return private_keys
 
 
 class HDPublicKey:
@@ -891,13 +872,3 @@ class HDTest(TestCase):
         with self.assertRaises(ValueError):
             mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon'
             HDPrivateKey.from_mnemonic(mnemonic)
-
-    def test_get_private_keys(self):
-        raw_paths = [bytes.fromhex('fbfef36f2c00008001000080000000800000000000000000'),
-                     bytes.fromhex('fbfef36f2c00008001000080000000800100000000000000')]
-        mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-        passphrase = b'jimmy@programmingblockchain.com Jimmy Song'
-        hd_priv = HDPrivateKey.from_mnemonic(mnemonic, passphrase, testnet=True)
-        private_keys = hd_priv.get_private_keys(raw_paths)
-        self.assertEqual(private_keys[0].wif(), 'cP88EsR4DgJNeswxecL4sE4Eornf3q1ZoRxoCnk8y9eEkQyxu3D7')
-        self.assertEqual(private_keys[1].wif(), 'cVtPxHBKyuKvjGhmEx3WjgfEy5ya1pgpGUPA5qnpg7i6bGyAHjsJ')

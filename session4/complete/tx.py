@@ -101,7 +101,11 @@ class Tx:
         )
 
     def clone(self):
-        return self.__class__.parse(BytesIO(self.serialize()), testnet=self.testnet)
+        tx_obj = self.__class__.parse(BytesIO(self.serialize()), testnet=self.testnet)
+        for tx_in_1, tx_in_2 in zip(self.tx_ins, tx_obj.tx_ins):
+            tx_in_2._value = tx_in_1._value
+            tx_in_2._script_pubkey = tx_in_1._script_pubkey
+        return tx_obj
 
     def id(self):
         '''Human-readable hexadecimal of the transaction hash'''

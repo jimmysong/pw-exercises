@@ -1,8 +1,8 @@
 from io import BytesIO
 from unittest import TestCase
 
-from ecc import PrivateKey, S256Point, Signature
-from hd import HDPublicKey
+from ecc import S256Point, Signature
+from hd import HDPrivateKey, HDPublicKey
 from helper import (
     base64_decode,
     base64_encode,
@@ -220,14 +220,8 @@ class PSBT:
                 tx_in.script_sig = Script()
             else:
                 script_sig = None
-            # if Witness exists, save it then empty it
-            if tx_in.witness:
-                witness = tx_in.witness
-                tx_in.witness = Witness()
-            else:
-                witness = None
-            # Create a PSBTIn with the TxIn, ScriptSig and Witness
-            psbt_in = PSBTIn(tx_in, script_sig=script_sig, witness=witness)
+            # Create a PSBTIn with the TxIn and ScriptSig
+            psbt_in = PSBTIn(tx_in, script_sig=script_sig)
             # add PSBTIn to array
             psbt_ins.append(psbt_in)
         # create an array of PSBTOuts
@@ -253,38 +247,27 @@ class PSBT:
         for psbt_out in self.psbt_outs:
             psbt_out.update(pubkey_lookup, redeem_lookup, witness_lookup)
 
-    def get_signing_raw_paths(self):
-        '''Returns a list of all raw paths that can sign something'''
-        # start a list of raw paths
-        raw_paths = []
-        # iterate through the PSBT inputs
-        for psbt_in in self.psbt_ins:
-            # iterate through the named_pubs values
-            for named_pub in psbt_in.named_pubs.values():
-                # add the raw path to the list
-                raw_paths.append(named_pub.raw_path)
-        # return the aggregate list
-        return raw_paths
-
-    def sign(self, private_keys):
-        '''Signs appropriate inputs with the private keys provided'''
+    def sign(self, hd_priv):
+        '''Signs appropriate inputs with the hd private key provided'''
         # set the signed boolean to False until we sign something
         signed = False
-        # iterate through each private key
-        for private_key in private_keys:
-            # grab the point associated with the point
-            point = private_key.point
-            # iterate through each PSBTIn
-            for i, psbt_in in enumerate(self.psbt_ins):
-                # if the sec is in the named_pubs dictionary
-                if psbt_in.named_pubs.get(point.sec()):
+        # grab the fingerprint of the private key
+        fingerprint = hd_priv.fingerprint()
+        # iterate through each PSBTIn
+        for i, psbt_in in enumerate(self.psbt_ins):
+            # iterate through the public keys associated with the PSBTIn
+            for named_pub in psbt_in.named_pubs.values():
+                # if the fingerprints match
+                if named_pub.root_fingerprint == fingerprint:
+                    # get the private key at the root_path of the NamedPublicKey
+                    private_key = hd_priv.traverse(named_pub.root_path).private_key
                     # check if prev_tx is defined (legacy)
                     if psbt_in.prev_tx:
                         # Exercise 5: get the signature using get_sig_legacy
                         sig = self.tx_obj.get_sig_legacy(i, private_key, psbt_in.redeem_script)
                         # update the sigs dict of the PSBTIn object
                         #  key is the sec and the value is the sig
-                        psbt_in.sigs[point.sec()] = sig
+                        psbt_in.sigs[private_key.point.sec()] = sig
                     else:
                         raise ValueError('pubkey included without the previous output')
                     # set signed to True
@@ -319,19 +302,11 @@ class PSBT:
         '''Returns the broadcast-able transaction'''
         # clone the transaction from self.tx_obj
         tx_obj = self.tx_obj.clone()
-        # determine if the transaction is segwit by looking for a witness field
-        #  in any PSBTIn. if so, set tx_obj.segwit = True
-        if any([psbt_in.witness for psbt_in in self.psbt_ins]):
-            tx_obj.segwit = True
         # iterate through the transaction and PSBT inputs together
         #  using zip(tx_obj.tx_ins, self.psbt_ins)
         for tx_in, psbt_in in zip(tx_obj.tx_ins, self.psbt_ins):
             # set the ScriptSig of the transaction input
             tx_in.script_sig = psbt_in.script_sig
-            # if the tx is segwit, set the witness as well
-            if tx_obj.segwit:
-                # witness should be an empty Witness() if none
-                tx_in.witness = psbt_in.witness
         # check to see that the transaction verifies
         if not tx_obj.verify():
             raise RuntimeError('transaction invalid')
@@ -662,20 +637,20 @@ class PSBTIn:
             for command in self.redeem_script.commands:
                 # if we find a NamedPublicKey, add to the named_pubs dictionary
                 #  key is compressed sec, value is the point object
-                hd_pub = pubkey_lookup.get(command)
-                if hd_pub:
-                    self.named_pubs[hd_pub.sec()] = hd_pub.point
+                named_pub = pubkey_lookup.get(command)
+                if named_pub:
+                    self.named_pubs[named_pub.sec()] = named_pub.point
         # Exercise 3: if we have p2pkh, see if we have the appropriate NamedPublicKey
         elif script_pubkey.is_p2pkh():
             # set the prev_tx property as it's not segwit
             self.prev_tx = prev_tx
             # look for the NamedPublicKey that corresponds to the hash160
             #  which is the 3rd command of the ScriptPubKey
-            hd_pub = pubkey_lookup.get(script_pubkey.commands[2])
-            if hd_pub:
+            named_pub = pubkey_lookup.get(script_pubkey.commands[2])
+            if named_pub:
                 # if it exists, add to the named_pubs dict
                 #  key is the sec and the value is the point
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
+                self.named_pubs[named_pub.sec()] = named_pub.point
         # else we throw a ValueError
         else:
             raise ValueError('cannot update a transaction because it is not p2pkh or p2sh'.format(script_pubkey))
@@ -715,10 +690,11 @@ class PSBTIn:
         sets the script_sig and witness fields'''
         # get the ScriptPubKey for this input
         script_pubkey = self.script_pubkey()
-        # Exercise 15: if the ScriptPubKey is p2sh, make sure there's a RedeemScript
+        # Exercise 15: if the ScriptPubKey is p2sh
         if script_pubkey.is_p2sh():
+            # make sure there's a RedeemScript
             if not self.redeem_script:
-                raise RuntimeError('Cannot finalize p2sh without a RedeemScript {}'.format(self))
+                raise RuntimeError('Cannot finalize p2sh without a RedeemScript')
             # convert the first command to a number (required # of sigs)
             num_sigs = op_code_to_number(self.redeem_script.commands[0])
             # make sure we have at least the number of sigs required
@@ -869,7 +845,7 @@ class PSBTOut:
         if self.redeem_script:
             result += serialize_key_value(PSBT_OUT_REDEEM_SCRIPT, self.redeem_script.raw_serialize())
         if self.witness_script:
-            result += serialize_key_value(PSBT_OUT_REDEEM_SCRIPT, self.witness_script.serialize())
+            result += serialize_key_value(PSBT_OUT_WITNESS_SCRIPT, self.witness_script.raw_serialize())
         for key in sorted(self.named_pubs.keys()):
             named_pub = self.named_pubs[key]
             result += named_pub.serialize(PSBT_OUT_BIP32_DERIVATION)
@@ -893,22 +869,22 @@ class PSBTOut:
                 return
             # Look through the commands in the RedeemScript for any NamedPublicKeys
             for command in self.redeem_script.commands:
-                hd_pub = pubkey_lookup.get(command)
+                named_pub = pubkey_lookup.get(command)
                 # if a NamedPublicKey exists
-                if hd_pub:
+                if named_pub:
                     # add to the named_pubs dictionary
                     #  key is sec and the point is the value
-                    self.named_pubs[hd_pub.sec()] = hd_pub.point
+                    self.named_pubs[named_pub.sec()] = named_pub.point
         # Exercise 3: if the ScriptPubKey is p2pkh,
         elif script_pubkey.is_p2pkh():
             # Look at the third command of the ScriptPubKey for the hash160
             # Use that to look up the NamedPublicKey
-            hd_pub = pubkey_lookup.get(script_pubkey.commands[2])
+            named_pub = pubkey_lookup.get(script_pubkey.commands[2])
             # if a NamedPublicKey exists
-            if hd_pub:
+            if named_pub:
                 # add to the named_pubs dictionary
                 #  key is sec and the point is the value
-                self.named_pubs[hd_pub.sec()] = hd_pub.point
+                self.named_pubs[named_pub.sec()] = named_pub.point
 
     def combine(self, other):
         '''Combines two PSBTOuts to self'''
@@ -948,17 +924,11 @@ class PSBTTest(TestCase):
         want = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         self.assertEqual(psbt_obj.serialize().hex(), want)
 
-    def test_get_signing_raw_paths(self):
-        hex_psbt = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
-        psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
-        raw_paths = psbt_obj.get_signing_raw_paths()
-        self.assertEqual(raw_paths, [bytes.fromhex('fbfef36f2c00008001000080000000800000000000000000')])
-
     def test_sign_p2pkh(self):
         hex_psbt = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         psbt_obj = PSBT.parse(BytesIO(bytes.fromhex(hex_psbt)))
-        private_keys = [PrivateKey.parse('cP88EsR4DgJNeswxecL4sE4Eornf3q1ZoRxoCnk8y9eEkQyxu3D7')]
-        self.assertTrue(psbt_obj.sign(private_keys))
+        hd_priv = HDPrivateKey.parse('tprv8ZgxMBicQKsPeL2qb9uLkgTKhLHSUUHsxmr2fcGFRBVh6EiBrxHZNTagx3kDXN4yjHsYV5rUYZhpsLCrZYBXzWLWHA4xL3FcCF6CZz1LDGM')
+        self.assertTrue(psbt_obj.sign(hd_priv))
         want = '70736274ff0100770100000001192f88eeabc44ac213604adbb5b699678815d24b718b5940f5b1b1853f0887480100000000ffffffff0220a10700000000001976a91426d5d464d148454c76f7095fdf03afc8bc8d82c388ac2c9f0700000000001976a9144df14c8c8873451290c53e95ebd1ee8fe488f0ed88ac00000000000100fda40102000000000102816f71fa2b62d7235ae316d54cb174053c793d16644064405a8326094518aaa901000000171600148900fe9d1950305978d57ebbc25f722bbf131b53feffffff6e3e62f2e005db1bb2a1f12e5ca2bfbb4f82f2ca023c23b0a10a035cabb38fb60000000017160014ae01dce99edb5398cee5e4dc536173d35a9495a9feffffff0278de16000000000017a914a2be7a5646958a5b53f1c3de5a896f6c0ff5419f8740420f00000000001976a9149a9bfaf8ef6c4b061a30e8e162da3458cfa122c688ac02473044022017506b1a15e0540efe5453fcc9c61dcc4457dd00d22cba5e5b937c56944f96ff02207a1c071a8e890cf69c4adef5154d6556e5b356fc09d74a7c811484de289c2d41012102de6c105c8ed6c54d9f7a166fbe3012fecbf4bb3cecda49a8aad1d0c07784110c0247304402207035217de1a2c587b1aaeb5605b043189d551451697acb74ffc99e5a288f4fde022013b7f33a916f9e05846d333b6ea314f56251e74f243682e0ec45ce9e16c6344d01210205174b405fba1b53a44faf08679d63c871cece6c3b2c343bd2d7c559aa32dfb1a2271800220202c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c483045022100b98bb5a69a081543e7e6de6b62b3243c8870211c679a8cf568916631494e99d50220631e1f70231286f059f5cdef8d746f7b8986cfec47346bdfea163528250d7d2401220602c1b6ac6e6a625fee295dc2d580f80aae08b7e76eca54ae88a854e956095af77c18fbfef36f2c00008001000080000000800000000000000000000000'
         self.assertEqual(psbt_obj.serialize().hex(), want)
 

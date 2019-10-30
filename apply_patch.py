@@ -18,7 +18,7 @@ else:
 
 to_patch = patch_file.split('.')[0] + '.py'
 
-for session in range(start, 4):
+for session in range(start, 6):
     if skip:
         skip = False
     else:
