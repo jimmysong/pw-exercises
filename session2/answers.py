@@ -1,4 +1,80 @@
 '''
+#markdown
+![](/files/programmingwallet.png)
+#endmarkdown
+#markdown
+![](/files/session2/s2.png)
+#endmarkdown
+#markdown
+# Session 2 Objectives
+* Learn pay-to-witness-script-hash
+* Learn how to make p2wsh addresses
+* Redeem a pay-to-witness-script-hash multisig outputs
+#endmarkdown
+#markdown
+# Pay to Witness Script Hash (p2wsh)
+#endmarkdown
+#markdown
+## Pay-to-witness-script-hash (p2wsh)
+* Like p2sh, but not malleable
+* Requires version 0 and a 32-byte hash
+* When redeeming, the last element must be the WitnessScript
+* The Witness Script's sha256 must equal the 32-byte hash
+#endmarkdown
+#markdown
+## p2pkh
+![](/files/session2/p2wsh-old.png)
+#endmarkdown
+#markdown
+## p2wpkh
+![](/files/session2/p2wsh-new.png)
+#endmarkdown
+#markdown
+## Pay to Witness Script Hash (aka "Native Segwit")
+* Acts like p2sh but puts the ScriptSig data in another place
+* New type of ScriptPubKey (0 and 32 bytes)
+* Different Data is sent to pre-Segwit nodes vs Segwit nodes
+#endmarkdown
+#markdown
+## Non-Segwit Nodes
+![](/files/session2/p2wsh-old-nodes.png)
+#endmarkdown
+#markdown
+## Segwit Nodes
+![](/files/session2/p2wsh-new-nodes.png)
+#endmarkdown
+## Combining Scripts
+* ScriptPubKey:
+![](/files/session2/p2wsh-scriptpubkey.png)
+* ScriptSig:
+Empty!
+#endmarkdown
+#markdown
+## Combined
+![](/files/session2/p2wsh-combined.png)
+#endmarkdown
+#markdown
+## Witness
+![](/files/session2/p2wsh-witness.png)
+#endmarkdown
+#markdown
+## WitnessScript
+![](/files/session2/p2wsh-witnessscript.png)
+#endmarkdown
+#code
+>>> from IPython.display import YouTubeVideo
+>>> YouTubeVideo('39g9OS4H-no')
+
+#endcode
+#markdown
+## Differences with p2wpkh
+* Witness is not just the signature and pubkey
+* Last element of Witness is required to be the WitnessScript
+* WitnessScript's sha256 must be the 32-bytes of the ScriptPubKey
+* Addresses are longer (32-bytes vs 20-bytes encoded)
+* Much more flexible (p2wsh is to p2wpkh as p2sh is to p2pkh)
+* ScriptCode = WitnessScript, not the p2pkh
+#endmarkdown
 #code
 >>> import ecc, script, tx
 
@@ -153,6 +229,64 @@ You have been provided with an unsigned transaction, witness script and 1 of the
 01000000000101dc60d3cc9fbfbfeae68031ee987d674315e3ec6fa5a910d913d1d70cc24bf6a70000000000ffffffff014c400f00000000001600146e13971913b9aa89659a9f53d327baa8826f2d750400473044022041a5f6066f066bb35d2e426bec0fa673fe9737461153eea66e23ab39ffc4f73602203e351dee8e0e3dd3fb5a86adca7c5a0eaee48e4d655c3a9d4655d235e6ad5a630147304402206f68a4c8731b1981fde3ae2f8ac3e21dbb42903853a3cecf18c30c31d36b510102207e5eba87f5d9134307d0f0cfb3eb065b18bf8a35df9a8b10538586328d1c7aa10147522102c3700ce19990bccbfa1e072d287049d7c0e07ed15c9aeac84bbc2c38ea667a5d21031dbe3aff7b9ad64e2612b8b15e9f5e4a3130663a526df91abfb7b1bd16de5d6e52ae00000000
 
 #endexercise
+#markdown
+# p2sh-p2wsh
+#endmarkdown
+#markdown
+## What is P2SH-P2WPKH?
+* Backwards-compatible p2wpkh
+* Uses p2sh to wrap more complicated segwit (p2wsh)
+* Looks like p2sh addresses which start with a 3
+#endmarkdown
+#markdown
+## p2pkh
+![](/files/session2/p2sh-p2wsh-old.png)
+#endmarkdown
+#markdown
+## p2wpkh
+![](/files/session2/p2sh-p2wsh-new.png)
+#endmarkdown
+#markdown
+## P2SH-P2WSH (aka "Nested Segwit")
+* Acts like p2wsh but looks like p2sh
+* ScriptPubKey looks exactly like p2sh
+* Different Data is sent to pre-Segwit nodes vs Segwit nodes
+#endmarkdown
+#markdown
+## Non-Segwit Nodes
+![](/files/session2/p2sh-p2wsh-old-nodes.png)
+#endmarkdown
+#markdown
+## Segwit Nodes
+![](/files/session2/p2sh-p2wsh-new-nodes.png)
+#endmarkdown
+## Combining Scripts
+* ScriptPubKey:
+![](/files/session2/p2sh-p2wsh-scriptpubkey.png)
+* ScriptSig:
+![](/files/session2/p2sh-p2wsh-scriptsig.png)
+#endmarkdown
+#markdown
+## Combined
+![](/files/session2/p2sh-p2wsh-combined.png)
+#endmarkdown
+#markdown
+## RedeemScript
+![](/files/session2/p2sh-p2wsh-redeemscript.png)
+#endmarkdown
+#markdown
+## Witness
+![](/files/session2/p2sh-p2wsh-witness.png)
+#endmarkdown
+#markdown
+## WitnessScript
+![](/files/session2/p2sh-p2wsh-witnessscript.png)
+#endmarkdown
+#code
+>>> from IPython.display import YouTubeVideo
+>>> YouTubeVideo('ZROtlZlZHZs')
+
+#endcode
 #code
 >>> # Example of generating a p2sh-p2wsh address
 >>> from ecc import S256Point

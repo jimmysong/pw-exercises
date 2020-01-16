@@ -45,7 +45,6 @@ for session in sessions:
         current = ''
         cell_type = None
         exercise_number = 1
-        first_code_cell = True
         for l in f:
             line = l.strip()
             if line in ('#markdown', '#code', '#exercise', '#unittest'):
@@ -63,10 +62,9 @@ for session in sessions:
                         if line.startswith('>>> ') or line.startswith('... '):
                             line = re.sub(r'\\\\x', r'\\x', line)
                             lines.append(line[4:])
-                    if first_code_cell:
+                    if lines[0].startswith('import '):
                         code = FIRST_CELL + '\n'.join(lines)
                         slide_type = 'skip'
-                        first_code_cell = False
                     else:
                         code = '\n'.join(lines)
                         slide_type = 'slide'
@@ -131,7 +129,6 @@ for session in sessions:
                         test_suite=test_suite,
                     )
                     code_cell = nbformat.v4.new_code_cell(code)
-                    code_cell.metadata['slideshow'] = dict(slide_type='slide')
                     cells.append(code_cell)
                     cells_complete.append(code_cell)
                     exercise_number += 1

@@ -80,15 +80,10 @@ Empty!
 * Precompute and reuse parts
 #endmarkdown
 #markdown
-#### Legacy Signature Hash Spec
+# Legacy Signature Hash Spec
 * Version
-* For each Input
-  - Previous Tx hash and index
-  - Previous ScriptPubKey or RedeemScript if input being signed otherwise null
-  - Sequence
-* For each output
-  - Amount
-  - ScriptPubKey
+* For each input: UTXO location/ScriptPubKey for input being signed/Sequence
+* For each output: Amount and ScriptPubKey
 * Locktime
 * Hashing Type (SIGHASH_ALL, usually)
 #endmarkdown
@@ -97,14 +92,13 @@ Empty!
 ![](/files/session1/p2wpkh-witness.png)
 #endmarkdown
 #markdown
-#### Segwit Signature Hash Spec (BIP143)
+# Segwit Signature Hash Spec (BIP143)
 * Version
-* HashPrevouts (calculated from tx hash and index of each input)
-* HashSequence (calculated from sequence of each input)
+* HashPrevouts (from TX hashes and indices of all inputs)
+* HashSequence (from sequences of all inputs)
 * Script Code
-* Value of input in Satoshis
-* Sequence
-* HashOutputs (calculated from amount and ScriptPubKey of each output)
+* Input Specific: value in Satoshis and sequence
+* HashOutputs (from amount and ScriptPubKey of all outputs)
 * Locktime
 * Hashing Type (SIGHASH_ALL, usually)
 #endmarkdown
