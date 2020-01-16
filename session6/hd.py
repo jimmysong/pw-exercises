@@ -63,14 +63,26 @@ class HDPrivateKey:
     def sec(self):
         return self.pub.sec()
 
+    def hash160(self):
+        return self.pub.hash160()
+
+    def p2pkh_script(self):
+        return self.pub.p2pkh_script()
+
+    def p2wpkh_script(self):
+        return self.pub.p2wpkh_script()
+
+    def p2sh_p2wpkh_script(self):
+        return self.pub.p2sh_p2wpkh_script()
+
     def address(self):
         return self.pub.address()
 
-    def p2sh_p2wpkh_address(self):
-        return self.pub.p2sh_p2wpkh_address()
-
     def bech32_address(self):
         return self.pub.bech32_address()
+
+    def p2sh_p2wpkh_address(self):
+        return self.pub.p2sh_p2wpkh_address()
 
     def __repr__(self):
         return self.xprv()
@@ -165,7 +177,7 @@ class HDPrivateKey:
         # add the 0 byte and the private key's secret in big endian, 33 bytes
         raw += int_to_big_endian(self.private_key.secret, 33)
         return raw
-    
+
     def _prv(self, version):
         '''Returns the base58-encoded x/y/z prv.
         Expects a 4-byte version.'''
@@ -377,18 +389,27 @@ class HDPublicKey:
     def hash160(self):
         return self.point.hash160()
 
-    def fingerprint(self):
-        '''Fingerprint is the hash160's first 4 bytes'''
-        return self.hash160()[:4]
+    def p2pkh_script(self):
+        return self.point.p2pkh_script()
+
+    def p2wpkh_script(self):
+        return self.point.p2wpkh_script()
+
+    def p2sh_p2wpkh_script(self):
+        return self.point.p2sh_p2wpkh_script()
 
     def address(self):
         return self.point.address(testnet=self.testnet)
 
+    def bech32_address(self):
+        return self.point.bech32_address(testnet=self.testnet)
+
     def p2sh_p2wpkh_address(self):
         return self.point.p2sh_p2wpkh_address(testnet=self.testnet)
 
-    def bech32_address(self):
-        return self.point.bech32_address(testnet=self.testnet)
+    def fingerprint(self):
+        '''Fingerprint is the hash160's first 4 bytes'''
+        return self.hash160()[:4]
 
     def child(self, index):
         '''Returns the child HDPrivateKey at a particular index.
@@ -551,10 +572,11 @@ class HDTest(TestCase):
         seed = b'jimmy@programmingblockchain.com Jimmy Song'
         priv = HDPrivateKey.from_seed(seed, testnet=True)
         pub = priv.pub
+        want = 'tb1qu6mnnk54hxfhy4aj58v0w6e7q8hghtv8wcdl7g'
         addr = priv.child(0).bech32_address()
-        self.assertEqual(addr, 'tb1qu6mnnk54hxfhy4aj58v0w6e7q8hghtv8wcdl7g')
+        self.assertEqual(addr, want)
         addr = pub.child(0).bech32_address()
-        self.assertEqual(addr, 'tb1qu6mnnk54hxfhy4aj58v0w6e7q8hghtv8wcdl7g')
+        self.assertEqual(addr, want)
         addr = priv.child(0x80000002).bech32_address()
         self.assertEqual(addr, 'tb1qscu8evdlqsucj7p84xwnrf63h4jsdr5yqga8zq')
         with self.assertRaises(ValueError):

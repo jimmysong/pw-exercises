@@ -53,6 +53,7 @@ for session in sessions:
             elif line == '#end{}'.format(cell_type):
                 if cell_type == 'markdown':
                     markdown_cell = nbformat.v4.new_markdown_cell(current)
+                    markdown_cell.metadata['slideshow'] = dict(slide_type='slide')
                     cells.append(markdown_cell)
                     cells_complete.append(markdown_cell)
                 elif cell_type == 'code':
@@ -64,10 +65,13 @@ for session in sessions:
                             lines.append(line[4:])
                     if first_code_cell:
                         code = FIRST_CELL + '\n'.join(lines)
+                        slide_type = 'skip'
                         first_code_cell = False
                     else:
                         code = '\n'.join(lines)
+                        slide_type = 'slide'
                     code_cell = nbformat.v4.new_code_cell(code)
+                    code_cell.metadata['slideshow'] = dict(slide_type=slide_type)
                     cells.append(code_cell)
                     cells_complete.append(code_cell)
                 elif cell_type == 'exercise':
@@ -77,6 +81,7 @@ for session in sessions:
                         instructions=instructions,
                     )
                     markdown_cell = nbformat.v4.new_markdown_cell(markdown)
+                    markdown_cell.metadata['slideshow'] = dict(slide_type='slide')
                     cells.append(markdown_cell)
                     cells_complete.append(markdown_cell)
                     lines = []
@@ -115,6 +120,7 @@ for session in sessions:
                         test_suite=test_suite,
                     )
                     markdown_cell = nbformat.v4.new_markdown_cell(markdown)
+                    markdown_cell.metadata['slideshow'] = dict(slide_type='slide')
                     cells.append(markdown_cell)
                     cells_complete.append(markdown_cell)
                     code = UNITTEST_TEMPLATE_2.format(
@@ -125,12 +131,16 @@ for session in sessions:
                         test_suite=test_suite,
                     )
                     code_cell = nbformat.v4.new_code_cell(code)
+                    code_cell.metadata['slideshow'] = dict(slide_type='slide')
                     cells.append(code_cell)
                     cells_complete.append(code_cell)
                     exercise_number += 1
                 current = ''
                 cell_type = None
             elif cell_type:
-                current += line + '\n'
+                if cell_type == 'markdown':
+                    current += l
+                else:
+                    current += line + '\n'
     nbformat.write(notebook, '{}/session{}.ipynb'.format(path, session))
     nbformat.write(notebook_complete, '{}/complete/session{}.ipynb'.format(path, session))

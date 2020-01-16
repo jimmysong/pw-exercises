@@ -9,8 +9,6 @@ from helper import (
     big_endian_to_int,
     decode_bech32,
     encode_base58_checksum,
-    encode_bech32_checksum,
-    encode_varstr,
     hash160,
     hash256,
     int_to_big_endian,
@@ -459,35 +457,35 @@ class S256Point(Point):
         # hash160 the sec
         return hash160(sec)
 
-    def address(self, compressed=True, testnet=False):
-        '''Returns the p2pkh address string'''
+    def p2pkh_script(self, compressed=True):
+        '''Returns the p2pkh Script object'''
         h160 = self.hash160(compressed)
+        # avoid circular dependency
         from script import P2PKHScriptPubKey
-        return P2PKHScriptPubKey(h160).address(testnet)
+        return P2PKHScriptPubKey(h160)
 
-    def bech32_address(self, testnet=False):
-        '''Returns the p2wpkh bech32 address string'''
-        # first, we want the segwit version, which is 0 (or b'\x00')
-        raw = b'\x00'
-        # next, add the hash160 by using encode_varstr
-        raw += encode_varstr(self.hash160())
-        # return the encode_bech32_checksum of the raw witness program
-        # remember to pass in testnet
-        return encode_bech32_checksum(raw, testnet)
+    def p2wpkh_script(self):
+        '''Returns the p2wpkh Script object'''
+        h160 = self.hash160(True)
+        # avoid circular dependency
+        from script import P2WPKHScriptPubKey
+        return P2WPKHScriptPubKey(h160)
 
     def p2sh_p2wpkh_redeem_script(self):
         '''Returns the RedeemScript for a p2sh-p2wpkh redemption'''
-        # avoid circular dependency
-        from script import P2WPKHScriptPubKey
-        # get the p2sh-p2wpkh RedeemScript using p2wpkh_script on the hash160
-        return P2WPKHScriptPubKey(self.hash160()).redeem_script()
+        return self.p2wpkh_script().redeem_script()
+
+    def address(self, compressed=True, testnet=False):
+        '''Returns the p2pkh address string'''
+        return self.p2pkh_script(compressed).address(testnet)
+
+    def bech32_address(self, testnet=False):
+        '''Returns the p2wpkh bech32 address string'''
+        return self.p2wpkh_script().address(testnet)
 
     def p2sh_p2wpkh_address(self, testnet=False):
         '''Returns the p2sh-p2wpkh base58 address string'''
-        # get the p2sh-p2wpkh RedeemScript
-        redeem_script = self.p2sh_p2wpkh_redeem_script()
-        # return the RedeemScript's p2sh_address, remember to pass in testnet
-        return redeem_script.address(testnet)
+        return self.p2wpkh_script().p2sh_address(testnet)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking

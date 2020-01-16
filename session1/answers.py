@@ -1,4 +1,48 @@
 '''
+#markdown
+![](/files/programmingwallet.png)
+#endmarkdown
+#markdown
+![](/files/session1/s1.png)
+#endmarkdown
+#markdown
+# Session 1 Objectives
+* Learn pay-to-witness-pubkey-hash
+* Learn bech32 addresses
+* Redeem a pay-to-witness-pubkey-hash output
+#endmarkdown
+#markdown
+# Pay to Witness Pubkey Hash (p2wpkh)
+#endmarkdown
+#markdown
+## What is Segregated Witness?
+* A way to fix transaction malleability
+* A way to reduce network transmission
+* A way to increase transaction throughput
+* A way for smooth future upgrades
+#endmarkdown
+#markdown
+## p2pkh
+![](/files/session1/old.png)
+#endmarkdown
+#markdown
+## p2wpkh
+![](/files/session1/new.png)
+#endmarkdown
+#markdown
+## Pay to Witness Pubkey Hash (aka "Native Segwit")
+* Acts like p2pkh but puts the ScriptSig data in another place
+* New type of ScriptPubKey
+* Different Data is sent to pre-Segwit nodes vs Segwit nodes
+#endmarkdown
+#markdown
+# Non-Segwit Nodes
+![](/files/session1/old-nodes.png)
+#endmarkdown
+#markdown
+# Segwit Nodes
+![](/files/session1/new-nodes.png)
+#endmarkdown
 #code
 >>> import ecc, script, tx
 
@@ -9,9 +53,110 @@ tx:TxTest:test_parse_segwit:
 #unittest
 tx:TxTest:test_serialize_segwit:
 #endunittest
+#markdown
+## Combining Scripts
+* ScriptPubKey:
+![](/files/session1/p2wpkh-scriptpubkey.png)
+* ScriptSig:
+Empty!
+#endmarkdown
+#markdown
+## Combined
+![](/files/session1/p2wpkh-combined.png)
+#endmarkdown
+#code
+>>> from IPython.display import YouTubeVideo
+>>> YouTubeVideo('ZHtJYfZsiAE')
+
+#endcode
+#markdown
+## Witness
+![](/files/session1/p2wpkh-witness.png)
+#endmarkdown
+#markdown
+## BIP143: New Signature Hash for Segwit
+* Solve quadratic hashing
+* Input amounts included
+* Precompute and reuse parts
+#endmarkdown
+#markdown
+#### Legacy Signature Hash Spec
+* Version
+* For each Input
+  - Previous Tx hash and index
+  - Previous ScriptPubKey or RedeemScript if input being signed otherwise null
+  - Sequence
+* For each output
+  - Amount
+  - ScriptPubKey
+* Locktime
+* Hashing Type (SIGHASH_ALL, usually)
+#endmarkdown
+#markdown
+# Witness
+![](/files/session1/p2wpkh-witness.png)
+#endmarkdown
+#markdown
+#### Segwit Signature Hash Spec (BIP143)
+* Version
+* HashPrevouts (calculated from tx hash and index of each input)
+* HashSequence (calculated from sequence of each input)
+* Script Code
+* Value of input in Satoshis
+* Sequence
+* HashOutputs (calculated from amount and ScriptPubKey of each output)
+* Locktime
+* Hashing Type (SIGHASH_ALL, usually)
+#endmarkdown
+#markdown
+## Script Code
+* ScriptPubKey being executed
+* For p2wpkh, this is the p2pkh ScriptPubKey
+* The 2nd argument is used as the hash
+#endmarkdown
 #unittest
 tx:TxTest:test_sig_hash_bip143:
 #endunittest
+#markdown
+# Bech32
+#endmarkdown
+#markdown
+### Problems with Base58
+* Encoding/Decoding is slow
+* Inefficient for QR codes
+* Hard to communicate in analog effectively
+* Hash256 checksum is slow and has no error-detection
+* Error-Detection requires a power of 2, 58 is not
+#endmarkdown
+#markdown
+### Bech32
+* Defined in BIP173
+* Uses BoseChaudhuriHocquenghem, or BCH Code, hence "Bech"
+* 32 characters, using only lower case letters and numbers
+* All characters (26+10) except 1, b, i, o
+* NOT ALPHABETICAL
+* Address has human part, separator, data and checksum
+#endmarkdown
+#markdown
+# Bech32 Address
+![](/files/session1/bech32.png)
+#endmarkdown
+#markdown
+### Human Part
+* bc = mainnet, tb = testnet
+
+### Separator
+* 1
+
+### Data Part
+* First character is the Segwit Version (0)
+* Rest is data (usually a hash) of 1 to 40 bytes
+
+#endmarkdown
+#markdown
+# Data Part
+![](/files/session1/segwitaddress.png)
+#endmarkdown
 #code
 >>> # example for creating a bech32 address
 >>> from ecc import S256Point
@@ -56,6 +201,12 @@ tb1qgqd0pdtu0f9hfyx9pzj86p686q70dtpwkmp0yw
 #unittest
 ecc:S256Test:test_bech32_address:
 #endunittest
+#markdown
+## Signing a p2wpkh Input
+* ScriptSig is empty!
+* Witness field has the signature and the compressed SEC pubkey
+![](/files/session1/p2wpkh-witness.png)
+#endmarkdown
 #code
 >>> # Example for signing a p2wpkh input
 >>> from io import BytesIO
@@ -155,6 +306,62 @@ True
 #unittest
 tx:TxTest:test_verify_p2wpkh:
 #endunittest
+#markdown
+## What is P2SH-P2WPKH?
+* Backwards-compatible p2wpkh
+* Uses p2sh to wrap single-key segwit (p2wpkh)
+* Looks like p2sh addresses which start with a 3
+#endmarkdown
+#markdown
+![](/files/session1/p2sh-p2wpkh-old.png)
+#endmarkdown
+#markdown
+![](/files/session1/p2sh-p2wpkh-new.png)
+#endmarkdown
+#markdown
+# P2SH-P2WPKH "Nested Segwit"
+* Acts like p2wpkh but looks like p2sh
+* ScriptPubKey looks exactly like p2sh
+* Different Data is sent to pre-Segwit nodes vs Segwit nodes
+#endmarkdown
+#markdown
+# Non-Segwit Nodes
+![](/files/session1/p2sh-p2wpkh-old-nodes.png)
+#endmarkdown
+#markdown
+# Segwit Nodes
+![](/files/session1/p2sh-p2wpkh-new-nodes.png)
+#endmarkdown
+#markdown
+## Combining Scripts
+* ScriptPubKey:
+![](/files/session1/p2sh-p2wpkh-scriptpubkey.png)
+* ScriptSig:
+![](/files/session1/p2sh-p2wpkh-scriptsig.png)
+#endmarkdown
+#markdown
+## Combined
+![](/files/session1/p2sh-p2wpkh-combined.png)
+#endmarkdown
+#markdown
+## RedeemScript
+![](/files/session1/p2sh-p2wpkh-redeemscript.png)
+#endmarkdown
+#markdown
+## Witness
+![](/files/session1/p2sh-p2wpkh-witness.png)
+#endmarkdown
+#code
+>>> from IPython.display import YouTubeVideo
+>>> YouTubeVideo('efDU3HZAHtc')
+
+#endcode
+#markdown
+### Generating a p2sh-p2wpkh address
+* RedeemScript is what would be the ScriptPubKey for p2wpkh
+* This is Segwit Version + 20 byte hash
+* p2sh address is the hash160 of the RedeemScript in Base58
+#endmarkdown
 #code
 >>> # Example of generating a p2sh-p2wpkh address
 >>> from ecc import S256Point
@@ -206,6 +413,12 @@ script:P2SHScriptPubKeyTest:test_address:
 #unittest
 ecc:S256Test:test_p2sh_p2wpkh_address:
 #endunittest
+#markdown
+### Signing a p2sh-p2wpkh input
+* ScriptSig is only the RedeemScript
+* RedeemScript is what would be the ScriptPubKey for p2wpkh
+* Witness is the signature and compressed SEC pubkey
+#endmarkdown
 #code
 >>> # Example for signing a p2sh-p2wpkh input
 >>> from io import BytesIO

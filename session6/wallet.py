@@ -2,7 +2,6 @@ import getpass
 
 from Crypto.Cipher import AES
 from io import BytesIO
-from logging import getLogger
 from mock import patch
 from secrets import token_bytes
 from time import time, sleep
@@ -10,7 +9,6 @@ from unittest import TestCase
 
 from hd import HDPrivateKey, MAINNET_XPRV, TESTNET_XPRV
 from helper import sha256
-from script import P2WPKHScriptPubKey
 from tx import Tx, TxIn, TxOut
 
 
@@ -163,9 +161,41 @@ class EncryptedPrivateTest(TestCase):
         tx_id = bytes.fromhex('07affe8b0ef5f009eef5399c20586b3181103564e8ffe444631dcae20389738c')
         tx_index = 0
         amount = 12753130
-        hd_pub = hd_priv.pub
-        script_pubkey = P2WPKHScriptPubKey(hd_pub.hash160())
         tx_in = TxIn(tx_id, tx_index)
-        tx_out = TxOut(amount - 5000, script_pubkey)
+        tx_out = TxOut(amount - 5000, hd_priv.p2wpkh_script())
         tx_obj = Tx(1, [tx_in], [tx_out], 0, testnet=True, segwit=True)
         self.assertTrue(tx_obj.sign_p2wpkh(0, hd_priv.private_key))
+        want = '010000000001018c738903e2ca1d6344e4ffe864351081316b58209c39f5ee09f0f50e8bfeaf070000000000ffffffff016285c200000000001600145b3a0784c7674df3645541a39f1d0061fafd121302483045022100ed55340424848ac402279a703440c3e64234cda15693b155e23daddea8e3ea75022018af9c2df35393e168980b835d1c08318e5417647522fb3c71c936fa20a416ae012102221f70f0e3f9cb3e164a45e7994e6e83816c76dc122d0987e4559536b888530b00000000'
+        self.assertEqual(want, tx_obj.serialize().hex())
+
+
+class Wallet:
+
+    def __init__(self, filename='main.wallet'):
+        self.filename = filename
+        self._load()
+
+    def _load(self):
+        with open(self.filename, 'br') as stream:
+            self.encrypted = EncryptedPrivateKey.parse(stream)
+            self.testnet = self.encrypted.testnet
+
+    @classmethod
+    def create(cls, filename='main.wallet', testnet=False):
+        '''Creates a wallet and returns the generated mnemonic'''
+        if exists(filename):
+            raise IOError('File already exists: {}'.format(filename))
+        mnemonic, encrypted = EncryptedPrivateKey.generate(testnet=testnet)
+        with open(filename, 'bw') as stream:
+            stream.write(encrypted.serialize())
+        return mnemonic, cls(filename)
+
+    @classmethod
+    def restore(cls, mnemonic, filename='main.wallet', testnet=False):
+        '''Restores a wallet given a mnemonic'''
+        if exists(filename):
+            raise IOError('File already exists: {}'.format(filename))
+        encrypted = EncryptedPrivateKey.from_mnemonic(mnemonic, testnet=testnet)
+        with open(filename, 'bw') as stream:
+            stream.write(encrypted.serialize())
+        return cls(filename)

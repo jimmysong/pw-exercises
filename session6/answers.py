@@ -1,6 +1,6 @@
 '''
 #code
->>> import ecc, script, tx
+>>> import wallet
 
 #endcode
 '''
