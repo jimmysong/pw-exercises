@@ -117,6 +117,20 @@ tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg
 #unittest
 hd:HDTest:test_from_seed:
 #endunittest
+#markdown
+# HD Child Derivation
+#endmarkdown
+#markdown
+# Deriving the child key
+* $eG=P$ where $e$ is the private key and $P$ is the public key
+* $H$ is HMAC-SHA512, $c$ is the chain code, $i$ is the child number
+* $h$ is the derivation source
+* For hardened children, $h=H(c,e||i)$
+* For unhardened children, $h=H(c,P||i)$
+* $e_{child}=h_l+e$ where $h_l$ is the first 256 bits of $h$
+* $P_{child}=h_l*G+P$
+* $c_{child}=h_r$ where $h_r$ is the last 256 bits of $h$
+#endmarkdown
 #code
 >>> # Example Unhardened Child Derivation
 >>> from ecc import N
@@ -166,6 +180,12 @@ tb1qscu8evdlqsucj7p84xwnrf63h4jsdr5yqga8zq
 #unittest
 hd:HDTest:test_child:
 #endunittest
+#markdown
+# Path Notation
+* m/x/y/z
+* m/1/2'/0 means the root key's 1st unhardened child's 2nd hardened child's 0th unhardened child
+* / delimits each level and ' indicates hardened
+#endmarkdown
 #code
 >>> # example of private key path traversal
 >>> from hd import HDPrivateKey
@@ -187,6 +207,28 @@ tb1q423gz8cenqt6vfw987vlyxql0rh2jgh4sy0tue
 #unittest
 hd:HDTest:test_traverse:
 #endunittest
+#markdown
+# Serialization
+#endmarkdown
+#markdown
+# HD Key Serialization
+* xprv/xpub standard (BIP32) used for p2pkh
+* yprv/ypub standard (BIP49) used for p2sh-p2wpkh
+* zprv/zpub standard (BIP84) used for p2wpkh
+#endmarkdown
+#markdown
+# xpub
+* version - 4 bytes `0488b21e`
+* depth - 1 byte
+* parent fingerprint - 4 bytes
+* child number - 4 bytes, big endian
+* chain code - 32 bytes
+* compressed SEC - 33 bytes
+* Result is base58-encoded
+#endmarkdown
+#markdown
+![](/files/session3/xpub.png)
+#endmarkdown
 #code
 >>> # Example to create an xpub
 >>> from hd import HDPrivateKey
@@ -203,6 +245,43 @@ hd:HDTest:test_traverse:
 xpub661MyMwAqRbcEpBhPYKfaLbRYynwb4fyL7N7xxB98h3sH5br3Tu4iNSe2S7yyP3AFXFoYRyZUWXJFw8o4sAaSTTQZLf8y3YJLRnJqSfnoWT
 
 #endcode
+#markdown
+# xprv
+* version - 4 bytes `0488ade4`
+* depth - 1 byte
+* parent fingerprint - 4 bytes
+* child number - 4 bytes, big endian
+* chain code - 32 bytes
+* private key prepended with `00` - 33 bytes
+* Result is base58-encoded
+#endmarkdown
+#exercise
+#### Create an xprv from your seed
+
+Spec is above, the only things that need to change versus the xpub is the version and the private key instead of the compressed SEC
+---
+>>> from hd import HDPrivateKey
+>>> from helper import encode_base58_checksum, int_to_byte, int_to_big_endian
+>>> passphrase = b'jimmy@programmingblockchain.com Jimmy Song'  #/passphrase = b'<fill this in>'
+>>> # create an HDPrivateKey instance using from_seed on testnet
+>>> hd_priv = HDPrivateKey.from_seed(passphrase, testnet=True)  #/
+>>> # add the version which should be '0488ade4' in binary
+>>> raw = bytes.fromhex('0488ade4')  #/
+>>> # add the depth as a single byte
+>>> raw += int_to_byte(hd_priv.depth)  #/
+>>> # add the parent fingerprint
+>>> raw += hd_priv.parent_fingerprint  #/
+>>> # add the child number in big endian 4 bytes
+>>> raw += int_to_big_endian(hd_priv.child_number, 4)  #/
+>>> # add the chain code
+>>> raw += hd_priv.chain_code  #/
+>>> # add the private key in big endian 33 bytes
+>>> raw += int_to_big_endian(hd_priv.private_key.secret, 33)  #/
+>>> # print the base58
+>>> print(encode_base58_checksum(raw))  #/
+xprv9s21ZrQH143K2L7EHWnfDCegzwxTBbx7xtSXAZmXaMWtQHGhVvapAa8ABAv7PmkCkcrxhVdSF5YHCA5n6u8CdjsgMRACrSbX1VQrMPQuVmJ
+
+#endexercise
 #unittest
 hd:HDTest:test_prv_pub:
 #endunittest
@@ -225,6 +304,25 @@ Create a xpub on testnet (should start with tpub)
 tpubD6NzVbkrYhZ4WcNYqjJknFvnt6tbaTB2sjxRKWEHUbom2NGZ7gk9rp7UGUCmVszQ3RniA1VS1cMLx7dQTj1pKtuhcwQSeaCXvPNibUHNR3F
 
 #endexercise
+#markdown
+# BIP44
+#endmarkdown
+#markdown
+# Motivation and Structure
+* Give structure to the BIP32 heirarchy
+* Purpose - 44' is p2pkh, 49' is p2sh-p2wpkh, 84' is p2wpkh
+* Coin - 0' is BTC, 1' is testnet BTC, many others [here](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
+* Account - Hardened child that corresponds to a payer
+* Chain - Unhardened child corresponding to receive addresses and change addresses (external/internal)
+* Address - Unhardened child to get an actual child
+#endmarkdown
+#markdown
+# Examples
+* m/44'/0'/0'/0/0 - p2pkh, Mainnet Bitcoin first account, external first address
+* m/44'/1'/2'/1/3 - p2pkh, Testnet Bitcoin, second account, internal, 4th address
+* m/49'/0'/1'/1/0 - p2sh-p2wpkh, Mainnet Bitcoin, second account, internal, first address
+* m/84'/1'/0'/0/2 - p2wpkh, Testnet Bitcoin, first count, external, third address
+#endmarkdown
 #code
 >>> # Example of getting p2pkh/p2sh-p2wpkh/p2wpkh testnet addresses
 >>> from hd import HDPrivateKey
@@ -283,6 +381,34 @@ tb1qrpeej834jx0ll3euv86fg09865falq83zp7v27
 tpubDDNz9YHarfY2LUuBCMs9nw25BfE8LTjXe2YSuqqZCCk4JdvFswmPUa9myShQng1FxHs2Z1bV9Wik5oR69DjJkEsZn2co7ejVKup8iAMNWyc
 
 #endexercise
+#markdown
+# Mnemonics
+#endmarkdown
+#markdown
+# What is a Mnemonic Backup?
+* A way to back up HD wallets
+* Easier to remember than base58
+* Uses 2048 English words whose first 4 letters differ
+* Each word stores 11 bits of information
+* There's 1 checksum bit for every 32 bits
+#endmarkdown
+#markdown
+# BIP39
+* Specifies Mnemonic Backup standard
+* Optional passphrase for more security
+* Different numbers of words correspond to different amounts of entropy
+* 12, 15, 18, 21 and 24 words allowed
+* Hard to brute force, even at 12 words
+#endmarkdown
+#markdown
+# How to generate a Mnemonic
+* Start with a 128/160/192/224/256 bit random number
+* Divide the number of bits by 32, that's how many checksum bits $n$
+* Checksum is the first n bits of the SHA256 of the random number as a big-endian integer
+* Combine the bits and checksum to produce a bit array
+* There should be some multiple of 11 bits.
+* Each 11 bits corresponds to a word as $2^{11}=2048$
+#endmarkdown
 #code
 
 >>> def secure_mnemonic(entropy=0, num_bits=128):
@@ -313,7 +439,16 @@ tpubDDNz9YHarfY2LUuBCMs9nw25BfE8LTjXe2YSuqqZCCk4JdvFswmPUa9myShQng1FxHs2Z1bV9Wik
 ...     return ' '.join(mnemonic)
 
 #endcode
+# Converting a Mnemonic to a Root HD Private key
+* Convert mnemonic to a number and verify checksum
+* Use the mnemonic in PBKDF2 to generate the seed
+* PBKDF2 = Password-based Key Derivation Function 2. Requires some pseudo-random function.
+* Pseudo-random function is HMAC-SHA512
+* PBKDF2 recursively applies the pseudo-random function $N$ times. $N = 2048$ for BIP39
+* PBKDF2 makes brute force attacks much more expensive
+#endmarkdown
 #code
+>>> # Example of mnemonic to HDPrivateKey
 >>> from hd import HDPrivateKey
 >>> from helper import hmac_sha512_kdf, sha256
 >>> from mnemonic import WORD_LOOKUP, WORD_LIST
