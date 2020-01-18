@@ -1,8 +1,97 @@
 '''
-#code
->>> import hd, tx
-
-#endcode
+#markdown
+![](/files/programmingwallet.png)
+#endmarkdown
+#markdown
+![](/files/session3/s3.png)
+#endmarkdown
+#markdown
+# Session 3 Objectives
+* Learn HD Wallets (BIP32)
+* Learn HD Wallet Organization (BIP44)
+* Learn Mnemonic Backup (BIP39)
+* Create Wallet Seeds
+#endmarkdown
+#markdown
+# HD Wallets
+#endmarkdown
+#markdown
+# Motivation
+* Reusing Addresses compromises privacy
+* Creating a new private key means having to back it up
+* Core wallet used to generate 100 private keys at a time
+* Backing up many private keys is not easy to do on paper
+#endmarkdown
+#markdown
+# Deterministic Wallets
+* Single seed can generate virtually infinite private keys
+* (N+1)st private key generated from the Nth private key and a code
+* Used first in Armory back in 2012
+#endmarkdown
+#markdown
+# Naive Deterministic Wallet
+* $eG=P$
+* $(e+1)G=eG+G=P+G$
+* $(e+2)G=eG+2G=P+2G$
+* ...
+* Store private key $e$ and reveal $P$ to payer
+* No privacy from chain analysis or payer
+#endmarkdown
+#markdown
+# Robust Deterministic Wallet
+* $eG=P$, $c$ is a shared secret, $H$ is a hash function
+* $(e+H(c,P,1))G=P+H(1+P,c)G$
+* $(e+H(c,P,2))G=P+H(2+P,c)G$
+* ...
+* Store private key $e$ and reveal $P$, $c$ to payer
+* Privacy from chain analysis
+* No privacy from payers
+#endmarkdown
+#markdown
+# Message Authentication Codes
+* Used for verifying that a message is authentic when you share a secret already
+* HMAC is an implementation of MAC where H stands for "hash-based"
+* Most cryptographic hash functions (like sha256) have an HMAC implementation
+#endmarkdown
+#markdown
+# Heirarchical Deterministic Wallets (BIP32)
+* Single seed + chain code (shared secret)
+* The master private key can generate $2^{32}$ child private keys
+* Every child private key can also generate $2^{32}$ child private keys
+* Revealing a child public key does not reveal the parent public key
+* Adds privacy from recpients
+#endmarkdown
+#markdown
+# Implementation
+* $eG=P$, $e$ is the private key, $P$ is the public key
+* $c$ is the chaincode $H$ is the HMAC-SHA512 function
+* $2^{31}$ hardened keys and $2^{31}$ unhardened keys
+* Hardened means the public key ($P$) and chain code ($c$) *cannot* derive the child public key.
+* Unhardened means the public key ($P$) and chain code ($c$) *can* derive the child public key
+#endmarkdown
+#markdown
+# Defining a HD Public Key
+* public key - normal ECC public key (33 bytes)
+* chain code - 32-byte shared secret with payers
+* depth - 0 is root, 1 is a child of root, 2 is grandchild of root, etc.
+* fingerprint- `00000000` for root, first 4 bytes of parent pubkey's hash160.
+* child number - ordering from parent
+#endmarkdown
+#markdown
+# Defining a HD Private Key
+* private key - normal ECC private key (33 bytes)
+* chain code - 32-byte shared secret with payers
+* depth - 0 is root, 1 is a child of root, 2 is grandchild of root, etc.
+* fingerprint- `00000000` for root, first 4 bytes of parent pubkey's hash160.
+* child number - ordering from parent
+#endmarkdown
+#markdown
+# Process for generating a Master HD Private Key
+* Create a seed of 128 to 512 bits
+* Calculate $h=H(d,s)$ where $H$ is HMAC-SHA512, $d$ is `Bitcoin seed` and $s$ is the seed.
+* Master secret = first 256 bits of $h$ in big-endian
+* Master chain code = last 256 bits of $h$ in big-endian
+#endmarkdown
 #code
 >>> # Example Master Key Generation
 >>> from ecc import PrivateKey
@@ -19,6 +108,10 @@
 ... )
 >>> print(master.bech32_address())
 tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg
+
+#endcode
+#code
+>>> import hd, tx
 
 #endcode
 #unittest
